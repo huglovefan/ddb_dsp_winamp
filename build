@@ -1,0 +1,16 @@
+#!/bin/sh
+# what's a makefile
+
+main() {
+	if [ $# -gt 0 ]; then
+		target="$1"; shift
+		( cd "$target" && exec ./build "$@" )
+	else
+		status=0
+		for d in host plugin; do
+			main "$d" || status=$?
+		done
+		return $status
+	fi
+}
+main "$@"
