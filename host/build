@@ -1,7 +1,7 @@
 #!/bin/sh
 
 : ${CC:=winegcc -m32 -mno-cygwin}
-: ${CFLAGS:=-Og -fstack-clash-protection -fstack-protector-strong -ggdb -mtune=native}
+: ${CFLAGS:=-Og -fstack-clash-protection -fstack-protector-strong -ggdb3 -mtune=native}
 
 : ${WINAMP_SDK_DIR:=~/.wine/drive_c/Program Files (x86)/Winamp SDK}
 : ${PREFIX:=~/.local}

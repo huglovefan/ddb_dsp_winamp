@@ -118,12 +118,10 @@ load_plugin_from_path(const char *path, int module_index)
 	plugins[nplugins].module = module;
 	plugins[nplugins].dll = dll;
 	plugins[nplugins].did_call_init = FALSE;
-	plugins[nplugins].process_max_frames = 0;
+	plugins[nplugins].process_max_frames = 2048;
 	if (module->description != NULL) {
-		if (strstr(module->description, "Freeverb") != NULL)
-			plugins[nplugins].process_max_frames = 2048;
-		else if (strstr(module->description, "PaceMaker") != NULL)
-			plugins[nplugins].process_max_frames = 2048;
+		if (strstr(module->description, "Stereo Tool") != NULL)
+			plugins[nplugins].process_max_frames = 4096;
 	}
 	nplugins += 1;
 
@@ -157,13 +155,12 @@ process_plugin_chunked(int nframes_in,
 
 	assert(plugin->process_max_frames != 0);
 	for (offset = 0; offset < nbytes_in; offset += max_bytes) {
-		size_t bytes = MIN(nbytes_in-offset, max_bytes);
+		size_t bytes = MIN(nbytes_in - offset, max_bytes);
 		assert(bytes != 0);
 		assert(bytes % ((request->bitspersample/8)*request->channels) == 0);
-		char buf[bytes*BUFFER_SIZE_MULT];
-		memcpy(buf, inbuf+offset, bytes);
+		memcpy(outbuf, inbuf + offset, bytes);
 		nframes = plugin->module->ModifySamples(plugin->module,
-		    (short int *)buf,
+		    (short int *)outbuf,
 		    bytes/(request->bitspersample/8)/request->channels,
 		    request->bitspersample,
 		    request->channels,
@@ -171,12 +168,8 @@ process_plugin_chunked(int nframes_in,
 		if (nframes < 0)
 			fprintf(stderr, "%s: nframes = %d\n", progname, nframes);
 		if (nframes > 0) {
-			assert(nframes*(request->bitspersample/8)*request->channels <= sizeof(buf));
-			memcpy(
-			    outbuf + (nframes_total*(request->bitspersample/8)*request->channels),
-			    buf,
-			    nframes*(request->bitspersample/8)*request->channels);
 			nframes_total += nframes;
+			outbuf += nframes*(request->bitspersample/8)*request->channels;
 		}
 	}
 	return nframes_total;
@@ -186,18 +179,14 @@ static int
 process_plugin_full(int nframes_in,
                     const struct processing_request *request,
                     struct plugin_info *plugin,
-                    const char *restrict inbuf,
-                    char *restrict outbuf)
+                    char *restrict buf)
 {
-	size_t nbytes_in = nframes_in*(request->bitspersample/8)*request->channels;
 	int nframes;
 
-	assert(nbytes_in != 0);
-	assert(nbytes_in % ((request->bitspersample/8)*request->channels) == 0);
-	memcpy(outbuf, inbuf, nbytes_in);
+	assert(nframes_in > 0);
 	nframes = plugin->module->ModifySamples(plugin->module,
-	    (short int *)outbuf,
-	    nbytes_in/(request->bitspersample/8)/request->channels,
+	    (short int *)buf,
+	    nframes_in,
 	    request->bitspersample,
 	    request->channels,
 	    request->samplerate);
@@ -234,18 +223,20 @@ reader_main(void *ud)
 			break;
 		nframes = request.buffer_size/(request.bitspersample/8)/request.channels;
 		for (i = 0; i < nplugins; i++) {
-			xrealloc(buffer2, BUFFER_SIZE_MULT*nframes*(request.bitspersample/8)*request.channels);
-			if (plugins[i].process_max_frames != 0 && (unsigned)nframes > plugins[i].process_max_frames)
+			if (plugins[i].process_max_frames != 0 && (unsigned)nframes > plugins[i].process_max_frames) {
+				xrealloc(buffer2, BUFFER_SIZE_MULT*nframes*(request.bitspersample/8)*request.channels);
 				nframes = process_plugin_chunked(nframes, &request, &plugins[i], buffer1, buffer2);
-			else
-				nframes = process_plugin_full(nframes, &request, &plugins[i], buffer1, buffer2);
+				char *tmp = buffer2;
+				buffer2 = buffer1;
+				buffer1 = tmp;
+			} else {
+				xrealloc(buffer1, BUFFER_SIZE_MULT*nframes*(request.bitspersample/8)*request.channels);
+				nframes = process_plugin_full(nframes, &request, &plugins[i], buffer1);
+			}
 			if (nframes <= 0) {
 				nframes = 0; /* not negative */
 				break;
 			}
-			char *tmp = buffer2;
-			buffer2 = buffer1;
-			buffer1 = tmp;
 		}
 		response.buffer_size = nframes*(request.bitspersample/8)*request.channels;
 		if ((size_t)write(STDOUT_FILENO, &response, sizeof(response)) != sizeof(response))
