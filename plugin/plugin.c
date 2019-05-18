@@ -1,5 +1,6 @@
 #include <assert.h>
 #include <fcntl.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -117,7 +118,7 @@ dsp_winamp_close(ddb_dsp_context_t *ctx)
 	free(plugin);
 }
 
-static int
+static bool
 process_check_child(plugin_t *plugin)
 {
 	if (plugin->child.pid < 0)
@@ -127,154 +128,121 @@ process_check_child(plugin_t *plugin)
 		child_stop(plugin);
 		child_start(plugin);
 		if (plugin->child.pid < 0)
-			return -1;
+			return false;
 	}
-	return 0;
+	return true;
 }
 
-static int
-dsp_winamp_process_normal(ddb_dsp_context_t *ctx,
-                         float *samples,
-                         int frames,
-                         int maxframes,
-                         ddb_waveformat_t *fmt,
-                         float *ratio)
+static bool
+process_write_request(plugin_t *ctx,
+                      float *samples,
+                      int frames,
+                      ddb_waveformat_t *fmt)
 {
 	plugin_t *plugin = (plugin_t *)ctx;
 	struct processing_request request;
-	struct processing_response response;
-	char *intsamples;
-	(void)ratio;
+	char *writebuf;
 
-	/* start child if not running */
-	if (process_check_child(plugin) < 0)
-		return 0;
-
-	/* make sure samples are in integer format */
-	if (fmt->is_float) {
-		intsamples = alloca(maxframes*(fmt->bps/8)*fmt->channels);
+	/* convert if needed */
+	if (fmt->is_float || (plugin->max_bps != 0 && fmt->bps > plugin->max_bps)) {
 		ddb_waveformat_t convfmt = *fmt;
+		if (plugin->max_bps != 0 && fmt->bps > plugin->max_bps)
+			convfmt.bps = plugin->max_bps;
 		convfmt.is_float = 0;
+		writebuf = alloca(frames*(convfmt.bps/8)*convfmt.channels);
 		assert(deadbeef->pcm_convert(
 		    fmt, (char *)samples,
-		    &convfmt, intsamples,
-		    frames*(fmt->bps/8)*fmt->channels) == frames*(fmt->bps/8)*fmt->channels);
-		fmt->is_float = 0;
+		    &convfmt, writebuf,
+		    frames*(fmt->bps/8)*fmt->channels) == frames*(convfmt.bps/8)*convfmt.channels);
+		fmt->bps = convfmt.bps;
+		fmt->is_float = convfmt.is_float;
 	} else {
-		intsamples = (char *)samples;
+		writebuf = (char *)samples;
 	}
 
 	request.buffer_size = frames*(fmt->bps/8)*fmt->channels;
 	request.samplerate = fmt->samplerate;
 	request.bitspersample = fmt->bps;
 	request.channels = fmt->channels;
-	if (write(plugin->child.stdin, &request, sizeof(request)) != sizeof(request))
-		goto failed;
-	if ((size_t)write(plugin->child.stdin, intsamples, request.buffer_size) != request.buffer_size)
-		goto failed;
 
-	if (read(plugin->child.stdout, &response, sizeof(response)) != sizeof(response))
-		goto failed;
-	if (response.buffer_size > 0) {
-		if (response.buffer_size > (size_t)(maxframes*(fmt->bps/8)*fmt->channels))
-			goto failed;
-		if ((size_t)read(plugin->child.stdout, samples, response.buffer_size) != response.buffer_size)
-			goto failed;
-	}
+	if ((size_t)write(plugin->child.stdin, &request, sizeof(request)) != sizeof(request))
+		return false;
+	if ((size_t)write(plugin->child.stdin, writebuf, request.buffer_size) != request.buffer_size)
+		return false;
 
-	return response.buffer_size/(fmt->bps/8)/fmt->channels;
-failed:
-	/* something went wrong, child is probably in an inconsistent state now */
-	fprintf(stderr, "dsp_winamp: something happened!\n");
-	child_stop(plugin);
-	return 0;
+	return true;
 }
 
-/* limited bit depth version for broken plugins
-   (this should probably be done in the host instead) */
-static int
-dsp_winamp_process_fixed(ddb_dsp_context_t *ctx,
-                        float *samples,
-                        int frames,
-                        int maxframes,
-                        ddb_waveformat_t *fmt,
-                        float *ratio)
+static bool
+process_read_response(plugin_t *plugin,
+                      float *samples,
+                      int *frames,
+                      int maxframes,
+                      ddb_waveformat_t *fmt)
 {
-	plugin_t *plugin = (plugin_t *)ctx;
-	struct processing_request request;
 	struct processing_response response;
-	ddb_waveformat_t convfmt;
-	char *convbuf;
-	(void)ratio;
 
-	/* start child if not running */
-	if (process_check_child(plugin) < 0)
-		return 0;
+	if ((size_t)read(plugin->child.stdout, &response, sizeof(response)) != sizeof(response))
+		return false;
 
-	convfmt = *fmt;
-	convfmt.bps = plugin->max_bps;
-	convfmt.is_float = 0;
+	*frames = response.buffer_size/(fmt->bps/8)/fmt->channels;
 
-	convbuf = alloca(maxframes*(convfmt.bps/8)*convfmt.channels);
-	assert(deadbeef->pcm_convert(
-	    fmt, (char *)samples,
-	    &convfmt, convbuf,
-	    frames*(fmt->bps/8)*fmt->channels) == frames*(convfmt.bps/8)*convfmt.channels);
+	if (response.buffer_size == 0)
+		return true;
+	if (*frames > maxframes)
+		return false;
+	if (response.buffer_size % ((fmt->bps/8)*fmt->channels) != 0)
+		return false;
 
-	request.buffer_size = frames*(convfmt.bps/8)*convfmt.channels;
-	request.samplerate = convfmt.samplerate;
-	request.bitspersample = convfmt.bps;
-	request.channels = convfmt.channels;
-	if (write(plugin->child.stdin, &request, sizeof(request)) != sizeof(request))
-		goto failed;
-	if ((size_t)write(plugin->child.stdin, convbuf, request.buffer_size) != request.buffer_size)
-		goto failed;
-
-	if (read(plugin->child.stdout, &response, sizeof(response)) != sizeof(response))
-		goto failed;
-	if (response.buffer_size > 0) {
-		if (response.buffer_size > (size_t)(maxframes*(convfmt.bps/8)*convfmt.channels))
-			goto failed;
-		if (response.buffer_size % ((convfmt.bps/8)*convfmt.channels) != 0)
-			goto failed;
-		if ((size_t)read(plugin->child.stdout, convbuf, response.buffer_size) != response.buffer_size)
-			goto failed;
-		/* deadbeef assumes the samples are 32 bits even if we set fmt->bps */
-		fmt->is_float = 0; /* don't convert to float again (this works) */
-		assert((size_t)deadbeef->pcm_convert(
-		    &convfmt, convbuf,
-		    fmt, (char *)samples,
-		    response.buffer_size) == (response.buffer_size/(convfmt.bps/8)/convfmt.channels)*(fmt->bps/8)*fmt->channels);
+	assert(!fmt->is_float); /* we set this earlier */
+	if (fmt->bps != 32) {
+		/* deadbeef assumes the samples are 32 bits even if we set fmt->bps,
+		   so read into a temporary buffer first and convert */
+		char *readbuf = alloca(response.buffer_size);
+		ddb_waveformat_t convfmt = *fmt;
+		convfmt.bps = 32;
+		if ((size_t)read(plugin->child.stdout, readbuf, response.buffer_size) != response.buffer_size)
+			return false;
+		assert(deadbeef->pcm_convert(
+		    fmt, readbuf,
+		    &convfmt, (char *)samples,
+		    response.buffer_size) == (*frames)*(convfmt.bps/8)*convfmt.channels);
+		fmt->bps = convfmt.bps;
+	} else {
+		/* don't need to convert */
+		if ((size_t)read(plugin->child.stdout, (char *)samples, response.buffer_size) != response.buffer_size)
+			return false;
 	}
-
-	return response.buffer_size/(convfmt.bps/8)/convfmt.channels;
-failed:
-	/* something went wrong, child is probably in an inconsistent state now */
-	fprintf(stderr, "dsp_winamp: something happened!\n");
-	child_stop(plugin);
-	return 0;
+	return true;
 }
 
 static int
 dsp_winamp_process(ddb_dsp_context_t *ctx,
-                  float *samples,
-                  int frames,
-                  int maxframes,
-                  ddb_waveformat_t *fmt,
-                  float *ratio)
+                   float *samples,
+                   int frames,
+                   int maxframes,
+                   ddb_waveformat_t *fmt,
+                   float *ratio)
 {
 	plugin_t *plugin = (plugin_t *)ctx;
+	(void)ratio;
 
-	if (plugin->max_bps != 0 && fmt->bps > plugin->max_bps)
-		return dsp_winamp_process_fixed(ctx, samples, frames, maxframes, fmt, ratio);
-	else
-		return dsp_winamp_process_normal(ctx, samples, frames, maxframes, fmt, ratio);
-}
+	/* start child if not running */
+	if (!process_check_child(plugin))
+		return 0;
 
-static void
-dsp_winamp_reset(ddb_dsp_context_t *ctx)
-{
-	(void)ctx;
+	if (!process_write_request(plugin, samples, frames, fmt))
+		goto failed;
+	if (!process_read_response(plugin, samples, &frames, maxframes, fmt))
+		goto failed;
+
+	assert(fmt->bps == 32 || frames == 0);
+	return frames;
+failed:
+	/* something went wrong, child is probably in an inconsistent state now */
+	fprintf(stderr, "dsp_winamp: something happened!\n");
+	child_stop(plugin);
+	return 0;
 }
 
 static int
@@ -348,7 +316,6 @@ static DB_dsp_t g_plugin = {
 	.open = dsp_winamp_open,
 	.close = dsp_winamp_close,
 	.process = dsp_winamp_process,
-	.reset = dsp_winamp_reset,
 	.num_params = dsp_winamp_num_params,
 	.get_param_name = dsp_winamp_get_param_name,
 	.set_param = dsp_winamp_set_param,
