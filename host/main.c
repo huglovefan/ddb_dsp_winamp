@@ -1,3 +1,4 @@
+#undef NDEBUG
 #include <assert.h>
 #include <errno.h>
 #include <inttypes.h>
@@ -12,17 +13,52 @@
 
 static const char *progname;
 
-/* regularbasename() doesn't do backslashes */
+static DWORD main_thread_id;
+static HANDLE reader_thread;
+
+struct plugin_info {
+	winampDSPModule *module;
+	HMODULE dll;
+	/* if we called module.Init() and should call module.Quit() later */
+	BOOL did_call_init;
+	/* limit for buggy plugins that crash if fed too much data at once */
+	unsigned int process_max_frames;
+};
+
+static struct plugin_info plugins[50];
+static unsigned int nplugins = 0;
+
+#define BUFFER_SIZE_MULT 2
+_Static_assert(BUFFER_SIZE_MULT >= 1, "");
+
+#define xrealloc(ptr, sz) assert((ptr = realloc(ptr, sz)) != NULL)
+#define  xmalloc(ptr, sz) assert((ptr =  malloc(     sz)) != NULL)
+
+#define MIN(a, b) ((a)<(b)?(a):(b))
+
+#define SWAP(p1, p2) \
+	do { \
+		void *tmp = p1; \
+		p1 = p2; \
+		p2 = tmp; \
+	} while (0)
+
+/* like basename() but supports backslashes too */
 static const char *
 superbasename(const char *path)
 {
 	const char *r = path;
-	for (; *path != '\0'; path += 1)
+	for (; *path != '\0'; path += 1) {
 		if (*path == '/' || *path == '\\')
 			r = path + 1;
+	}
 	return r;
 }
 
+/*
+ * "dir\dsp.dll"   -> "dir\dsp.dll", -1
+ * "dir\dsp.dll:2" -> "dir\dsp.dll",  2
+ */
 static void
 parse_plugin_path(const char *path, char **filename, int *index)
 {
@@ -44,16 +80,6 @@ parse_plugin_path(const char *path, char **filename, int *index)
 		*index = -1;
 	}
 }
-
-struct plugin_info {
-	winampDSPModule *module;
-	HMODULE dll;
-	BOOL did_call_init;
-	size_t process_max_frames;
-};
-
-static struct plugin_info plugins[50];
-static unsigned int nplugins = 0;
 
 static BOOL
 load_plugin_from_path(const char *path, int module_index)
@@ -118,11 +144,9 @@ load_plugin_from_path(const char *path, int module_index)
 	plugins[nplugins].module = module;
 	plugins[nplugins].dll = dll;
 	plugins[nplugins].did_call_init = FALSE;
-	plugins[nplugins].process_max_frames = 2048;
-	if (module->description != NULL) {
-		if (strstr(module->description, "Stereo Tool") != NULL)
-			plugins[nplugins].process_max_frames = 4096;
-	}
+	plugins[nplugins].process_max_frames = 1024;
+	if (strstr(module->description, "Stereo Tool") != NULL)
+		plugins[nplugins].process_max_frames = 4096;
 	nplugins += 1;
 
 	return TRUE;
@@ -132,15 +156,6 @@ failed:
 	return FALSE;
 }
 
-static DWORD main_thread;
-
-#define BUFFER_SIZE_MULT 2
-
-#define xrealloc(ptr, sz) assert((ptr = realloc(ptr, sz)) != NULL)
-static inline char *xmalloc(size_t sz) { char *p = malloc(sz); assert(p != NULL); return p; }
-
-#define MIN(a,b)((a)<(b)?(a):(b))
-
 static int
 process_plugin_chunked(int nframes_in,
                        const struct processing_request *request,
@@ -148,31 +163,32 @@ process_plugin_chunked(int nframes_in,
                        const char *restrict inbuf,
                        char *restrict outbuf)
 {
-	size_t nbytes_in = nframes_in*(request->bitspersample/8)*request->channels;
-	size_t max_bytes = plugin->process_max_frames*(request->bitspersample/8)*request->channels;
-	unsigned offset;
-	int nframes, nframes_total = 0;
+	int nframes_out = 0;
 
+	assert(nframes_in > 0);
 	assert(plugin->process_max_frames != 0);
-	for (offset = 0; offset < nbytes_in; offset += max_bytes) {
-		size_t bytes = MIN(nbytes_in - offset, max_bytes);
-		assert(bytes != 0);
-		assert(bytes % ((request->bitspersample/8)*request->channels) == 0);
-		memcpy(outbuf, inbuf + offset, bytes);
-		nframes = plugin->module->ModifySamples(plugin->module,
+	assert(inbuf != outbuf);
+	while (nframes_in > 0) {
+		int chunk_nframes_in = MIN((unsigned)nframes_in, plugin->process_max_frames);
+		int chunk_nframes_out;
+		memcpy(outbuf, inbuf,
+		    chunk_nframes_in*(request->bitspersample/8)*request->channels);
+		chunk_nframes_out = plugin->module->ModifySamples(plugin->module,
 		    (short int *)outbuf,
-		    bytes/(request->bitspersample/8)/request->channels,
+		    chunk_nframes_in,
 		    request->bitspersample,
 		    request->channels,
 		    request->samplerate);
-		if (nframes < 0)
-			fprintf(stderr, "%s: nframes = %d\n", progname, nframes);
-		if (nframes > 0) {
-			nframes_total += nframes;
-			outbuf += nframes*(request->bitspersample/8)*request->channels;
-		}
+		if (chunk_nframes_out < 0)
+			chunk_nframes_out = 0;
+		inbuf += chunk_nframes_in*(request->bitspersample/8)*request->channels;
+		outbuf += chunk_nframes_out*(request->bitspersample/8)*request->channels;
+		nframes_in -= chunk_nframes_in;
+		nframes_out += chunk_nframes_out;
+		assert(chunk_nframes_out <= chunk_nframes_in*BUFFER_SIZE_MULT);
 	}
-	return nframes_total;
+	assert(nframes_in == 0);
+	return nframes_out;
 }
 
 static int
@@ -184,33 +200,33 @@ process_plugin_full(int nframes_in,
 	int nframes;
 
 	assert(nframes_in > 0);
+	assert(plugin->process_max_frames == 0 || (unsigned)nframes_in <= plugin->process_max_frames);
 	nframes = plugin->module->ModifySamples(plugin->module,
 	    (short int *)buf,
 	    nframes_in,
 	    request->bitspersample,
 	    request->channels,
 	    request->samplerate);
-	if (nframes < 0) {
-		fprintf(stderr, "%s: nframes = %d\n", progname, nframes);
+	if (nframes < 0)
 		nframes = 0;
-	}
+	assert(nframes <= nframes_in*BUFFER_SIZE_MULT);
 	return nframes;
 }
-
-static HANDLE reader_thread;
 
 static DWORD
 reader_main(void *ud)
 {
 	struct processing_request request;
 	struct processing_response response;
-	size_t buffer_size = 4096*(32*2)*2;
-	char *buffer1 = (char *)xmalloc(buffer_size);
-	char *buffer2 = (char *)xmalloc(buffer_size);
+	size_t buffer_size = BUFFER_SIZE_MULT*4096*(32/8)*2;
+	char *buffer1;
+	char *buffer2;
 	unsigned int i;
 	int nframes;
 	(void)ud;
 
+	xmalloc(buffer1, buffer_size);
+	xmalloc(buffer2, buffer_size);
 	for (;;) {
 		if ((size_t)read(STDIN_FILENO, &request, sizeof(request)) != sizeof(request))
 			break;
@@ -222,22 +238,19 @@ reader_main(void *ud)
 		if ((size_t)read(STDIN_FILENO, buffer1, request.buffer_size) != request.buffer_size)
 			break;
 		nframes = request.buffer_size/(request.bitspersample/8)/request.channels;
-		for (i = 0; i < nplugins; i++) {
+		for (i = 0; i < nplugins && nframes > 0; i++) {
 			if (plugins[i].process_max_frames != 0 && (unsigned)nframes > plugins[i].process_max_frames) {
 				xrealloc(buffer2, BUFFER_SIZE_MULT*nframes*(request.bitspersample/8)*request.channels);
 				nframes = process_plugin_chunked(nframes, &request, &plugins[i], buffer1, buffer2);
-				char *tmp = buffer2;
-				buffer2 = buffer1;
-				buffer1 = tmp;
+				SWAP(buffer2, buffer1);
 			} else {
 				xrealloc(buffer1, BUFFER_SIZE_MULT*nframes*(request.bitspersample/8)*request.channels);
 				nframes = process_plugin_full(nframes, &request, &plugins[i], buffer1);
 			}
-			if (nframes <= 0) {
-				nframes = 0; /* not negative */
-				break;
-			}
+			/* processed output is in buffer1 */
 		}
+		if (nframes < 0)
+			nframes = 0;
 		response.buffer_size = nframes*(request.bitspersample/8)*request.channels;
 		if ((size_t)write(STDOUT_FILENO, &response, sizeof(response)) != sizeof(response))
 			break;
@@ -246,7 +259,7 @@ reader_main(void *ud)
 				break;
 		}
 	}
-	PostThreadMessage(main_thread, WM_QUIT, 0, 0);
+	PostThreadMessage(main_thread_id, WM_QUIT, 0, 0);
 	return 0;
 }
 
@@ -256,7 +269,7 @@ main(int argc, char **argv)
 	int i, status = 0;
 
 	progname = superbasename(argv[0]);
-	main_thread = GetCurrentThreadId();
+	main_thread_id = GetCurrentThreadId();
 
 	if (argc <= 1) {
 		fprintf(stderr, "usage: %s path\\to\\dsp_plugin.dll[:module_index] ...\n", progname);
@@ -312,7 +325,7 @@ exit:
 		WaitForSingleObject(reader_thread, 1000);
 	}
 
-	for (i = nplugins-1; i >= 0; i--) {
+	for (i = nplugins - 1; i >= 0; i--) {
 		if (plugins[i].did_call_init && plugins[i].module->Quit != NULL)
 			plugins[i].module->Quit(plugins[i].module);
 		FreeLibrary(plugins[i].dll);

@@ -28,7 +28,7 @@ main() {
 		;;
 	install)
 		install -Dv ddw_host.exe "$PREFIX"/bin/ddw_host.exe
-		install -Dv ddw_host.exe.so "$PREFIX"/bin/ddw_host.exe.so
+		[ -f ddw_host.exe.so ] && install -Dv ddw_host.exe.so "$PREFIX"/bin/ddw_host.exe.so
 		case :$PATH: in
 		*:"$PREFIX"/bin:*);;
 		*) >&2 echo "note: $PREFIX/bin not found in PATH"
