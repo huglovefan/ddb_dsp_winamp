@@ -1,0 +1,13 @@
+diff --git a/dsp.c b/dsp.c
+index 141986d2..8d03635a 100644
+--- a/dsp.c
++++ b/dsp.c
+@@ -447,7 +447,7 @@ dsp_apply (ddb_waveformat_t *input_fmt, char *input, int inputsize,
+ 
+     memcpy (out_fmt, &dspfmt, sizeof (ddb_waveformat_t));
+     *out_bytes = tempbuf;
+-    *out_numbytes = nframes * dspfmt.channels * sizeof (float);
++    *out_numbytes = nframes * dspfmt.channels * dspfmt.bps / 8;
+ 
+     return 1;
+ }
