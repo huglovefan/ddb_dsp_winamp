@@ -265,6 +265,7 @@ dsp_winamp_process(ddb_dsp_context_t *ctx,
                    float *ratio)
 {
 	plugin_t *plugin = (plugin_t *)ctx;
+	int frames_in = frames;
 	(void)ratio;
 
 	if (ctx->plugin->can_bypass(ctx, fmt))
@@ -283,7 +284,9 @@ dsp_winamp_process(ddb_dsp_context_t *ctx,
 			assert(fmt->bps == 32);
 		if (next_dsp_needs_f32(plugin, fmt))
 			assert(fmt->bps == 32 && fmt->is_float);
-	}
+		*ratio = ((float)frames_in)/((float)frames);
+	} else
+		*ratio = 0;
 	return frames;
 failed:
 	/* something went wrong, child is probably in an inconsistent state now */
