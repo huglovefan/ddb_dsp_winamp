@@ -187,7 +187,7 @@ process_write_request(plugin_t *ctx,
 	/* convert if needed */
 	if (fmt->is_float || (plugin->max_bps != 0 && fmt->bps > plugin->max_bps)) {
 		ddb_waveformat_t convfmt = *fmt;
-		int rv;
+		int __attribute__((unused)) rv;
 		if (plugin->max_bps != 0 && fmt->bps > plugin->max_bps)
 			convfmt.bps = plugin->max_bps;
 		convfmt.is_float = 0;
@@ -244,7 +244,7 @@ process_read_response(plugin_t *plugin,
 	    (!g_deadbeef->conf_get_int("ddw.patch1", 0) && fmt->bps != 32)) {
 		char *readbuf = alloca(response.buffer_size);
 		ddb_waveformat_t convfmt = *fmt;
-		int rv;
+		int __attribute__((unused)) rv;
 		convfmt.bps = 32;
 		/* only convert to float if we have to */
 		if (need_f32)
