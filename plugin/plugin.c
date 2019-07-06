@@ -12,6 +12,12 @@
 
 #include "../common.h"
 
+#if defined(__linux__) && !defined(__GLIBC__)
+/* musl defines these as macros */
+#undef stdin
+#undef stdout
+#endif
+
 static DB_functions_t *g_deadbeef;
 static DB_dsp_t        g_plugin;
 
