@@ -181,14 +181,16 @@ process_write_request(plugin_t *ctx,
 	/* convert if needed */
 	if (fmt->is_float || (plugin->max_bps != 0 && fmt->bps > plugin->max_bps)) {
 		ddb_waveformat_t convfmt = *fmt;
+		int rv;
 		if (plugin->max_bps != 0 && fmt->bps > plugin->max_bps)
 			convfmt.bps = plugin->max_bps;
 		convfmt.is_float = 0;
 		writebuf = alloca(frames*(convfmt.bps/8)*convfmt.channels);
-		assert(g_deadbeef->pcm_convert(
+		rv = g_deadbeef->pcm_convert(
 		    fmt, (char *)samples,
 		    &convfmt, writebuf,
-		    frames*(fmt->bps/8)*fmt->channels) == frames*(convfmt.bps/8)*convfmt.channels);
+		    frames*(fmt->bps/8)*fmt->channels);
+		assert(rv == frames*(convfmt.bps/8)*convfmt.channels);
 		fmt->bps = convfmt.bps;
 		fmt->is_float = convfmt.is_float;
 	} else {
@@ -236,16 +238,18 @@ process_read_response(plugin_t *plugin,
 	    (!g_deadbeef->conf_get_int("ddw.patch1", 0) && fmt->bps != 32)) {
 		char *readbuf = alloca(response.buffer_size);
 		ddb_waveformat_t convfmt = *fmt;
+		int rv;
 		convfmt.bps = 32;
 		/* only convert to float if we have to */
 		if (need_f32)
 			convfmt.is_float = 1;
 		if ((size_t)read(plugin->child.stdout, readbuf, response.buffer_size) != response.buffer_size)
 			return false;
-		assert(g_deadbeef->pcm_convert(
+		rv = g_deadbeef->pcm_convert(
 		    fmt, readbuf,
 		    &convfmt, (char *)samples,
-		    response.buffer_size) == (*frames)*(convfmt.bps/8)*convfmt.channels);
+		    response.buffer_size);
+		assert(rv == (*frames)*(convfmt.bps/8)*convfmt.channels);
 		fmt->bps = convfmt.bps;
 		fmt->is_float = convfmt.is_float;
 	} else {
@@ -280,10 +284,12 @@ dsp_winamp_process(ddb_dsp_context_t *ctx,
 		goto failed;
 
 	if (frames > 0) {
+#ifndef NDEBUG
 		if (!g_deadbeef->conf_get_int("ddw.patch1", 0))
 			assert(fmt->bps == 32);
 		if (next_dsp_needs_f32(plugin, fmt))
 			assert(fmt->bps == 32 && fmt->is_float);
+#endif
 		*ratio = ((float)frames_in)/((float)frames);
 	} else
 		*ratio = 0;
