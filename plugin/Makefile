@@ -10,10 +10,10 @@ dsp_winamp.so: ../common.h plugin.c
 	$(CC) $(CFLAGS) plugin.c -o $@
 
 install:
-	install -Dv dsp_winamp.so $(DESTDIR)$(PREFIX)/lib/deadbeef/dsp_winamp.so
+	@install -Dv dsp_winamp.so $(DESTDIR)$(PREFIX)/lib/deadbeef/dsp_winamp.so
 
 uninstall:
 	rm $(DESTDIR)$(PREFIX)/lib/deadbeef/dsp_winamp.so
 
 clean:
-	rm dsp_winamp.so
+	-rm dsp_winamp.so
