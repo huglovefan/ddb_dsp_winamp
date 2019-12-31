@@ -1,0 +1,21 @@
+--- a/dsp.c
++++ b/dsp.c
+@@ -390,8 +390,6 @@
+ 
+     ddb_waveformat_t dspfmt;
+     memcpy (&dspfmt, input_fmt, sizeof (ddb_waveformat_t));
+-    dspfmt.bps = 32;
+-    dspfmt.is_float = 1;
+ 
+     int can_bypass = 0;
+     if (dsp_on) {
+@@ -428,8 +426,7 @@
+     int tempbuf_size = inputsize/inputsamplesize * dspsamplesize * MAX_DSP_RATIO;
+     char *tempbuf = ensure_dsp_temp_buffer (tempbuf_size);
+ 
+-    // convert to float
+-    /*int tempsize = */pcm_convert (input_fmt, input, &dspfmt, tempbuf, inputsize);
++    memcpy (tempbuf, input, inputsize);
+     int nframes = inputsize / inputsamplesize;
+     ddb_dsp_context_t *dsp = dsp_chain;
+     float ratio = 1.f;

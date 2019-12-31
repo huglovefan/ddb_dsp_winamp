@@ -1,10 +1,9 @@
+#include <alloca.h>
 #include <assert.h>
-#include <fcntl.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/resource.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
@@ -21,10 +20,11 @@
 static DB_functions_t *g_deadbeef;
 static DB_dsp_t        g_plugin;
 
+static bool have_patch1 = false;
+
 typedef struct {
 	ddb_dsp_context_t ctx;
-	char *dll; /* actually a shell pattern */
-	bool dll_exists;
+	char *dll;
 	unsigned short max_bps;
 	struct {
 		pid_t pid;
@@ -33,94 +33,101 @@ typedef struct {
 	} child;
 } plugin_t;
 
-/* checks if the next dsp in the chain probably expects samples in the default format */
+#define SENSIBLE_WAVEFMT(x) ( \
+	(x).bps >= 8 && \
+	(x).bps <= 32 && \
+	(x).bps % 8 == 0 && \
+	(x).channels > 0 && \
+	(x).samplerate > 0)
+
 static bool
-next_dsp_needs_f32(plugin_t *plugin, ddb_waveformat_t *infmt)
+__attribute__((hot))
+next_dsp_needs_f32(plugin_t *plugin, const ddb_waveformat_t *infmt)
 {
-	ddb_waveformat_t fmt = *infmt;
+	ddb_waveformat_t tmpfmt = *infmt;
 	ddb_dsp_context_t *ctx = plugin->ctx.next;
 
-	fmt.bps = 32;
-	fmt.is_float = 1;
+	tmpfmt.bps = 32;
+	tmpfmt.is_float = 1;
+
+	/* get the next non-bypassed dsp */
 	while (ctx != NULL) {
-		if (ctx->plugin->can_bypass != NULL &&
-		    ctx->plugin->can_bypass(ctx, &fmt)) {
+		if (LIKELY(ctx->plugin->plugin.api_vminor >= 1) &&
+		    ctx->plugin->can_bypass != NULL &&
+		    ctx->plugin->can_bypass(ctx, &tmpfmt)) {
 			ctx = ctx->next;
 			continue;
 		}
-		if (ctx->plugin == &g_plugin)
-			return false;
 		break;
 	}
-	return (ctx != NULL);
+
+	return ctx != NULL && ctx->plugin != &g_plugin;
 }
 
 static void
-child_stop(plugin_t *plugin)
+__attribute__((cold))
+close_extra(void)
 {
-	close(plugin->child.stdout);
-	plugin->child.stdout = -1;
-	close(plugin->child.stdin);
-	plugin->child.stdin = -1;
+	struct dirent **namelist;
+	int count;
 
-	if (plugin->child.pid >= 0) {
-		if (waitpid(plugin->child.pid, NULL, 0) < 0)
-			perror("dsp_winamp: waitpid");
-		plugin->child.pid = -1;
+	count = scandir("/proc/self/fd", &namelist, NULL, NULL);
+	if (UNLIKELY(count < 0))
+		return;
+
+	for (int i = 0; i < count; i++) {
+		int fd = atoi(namelist[i]->d_name);
+		if (LIKELY(fd > 2))
+			close(fd);
+		free(namelist[i]);
 	}
+
+	free(namelist);
 }
 
-static rlim_t
-get_max_fd(void)
-{
-	struct rlimit nofile;
-
-	if (getrlimit(RLIMIT_NOFILE, &nofile) >= 0) {
-		return nofile.rlim_cur;
-	} else {
-		perror("dsp_winamp: getrlimit");
-		return 1024;
-	}
-}
-
-static void
+static bool
+__attribute__((cold))
+__attribute__((noinline))
 child_start(plugin_t *plugin)
 {
+	const char *host;
 	int stdin[2] = {-1, -1},
 	    stdout[2] = {-1, -1}; /* {read_end, write_end} */
-	rlim_t max_fd = get_max_fd();
 	pid_t pid = -1;
 
-	if ((pipe(stdin) < 0) ||
-	    (pipe(stdout) < 0)) {
-		perror("dsp_winamp: pipe");
+	if (UNLIKELY(pipe(stdin) < 0 || pipe(stdout) < 0)) {
+		perror("pipe");
 		goto failed;
 	}
 
 	g_deadbeef->conf_lock();
-	const char *host = g_deadbeef->conf_get_str_fast("ddw.host_cmd", "ddw_host.exe");
-	char *cmd = alloca(4 + 1 + strlen(host) + 1 + strlen(plugin->dll) + 1);
-	sprintf(cmd, "exec %s %s", host, plugin->dll);
+	host = g_deadbeef->conf_get_str_fast("ddw.host_cmd", "ddw_host.exe");
 	g_deadbeef->conf_unlock();
+	assert(host != NULL);
 
 	pid = fork();
-	if (pid < 0) {
-		perror("dsp_winamp: fork");
+	if (UNLIKELY(pid < 0)) {
+		perror("fork");
 failed:
 		close(stdin[0]);
 		close(stdin[1]);
 		close(stdout[0]);
 		close(stdout[1]);
+		return false;
 	} else if (pid == 0) {
-		if (dup2(stdin[0], STDIN_FILENO) < 0 ||
-		    dup2(stdout[1], STDOUT_FILENO) < 0) {
-			perror("dsp_winamp: dup2");
+		char *cmd;
+		size_t bufsz;
+		if (UNLIKELY(dup2(stdin[0], STDIN_FILENO) < 0 ||
+		             dup2(stdout[1], STDOUT_FILENO) < 0)) {
+			perror("dup2");
 			_exit(EXIT_FAILURE);
 		}
-		for (unsigned i = 3; i < max_fd; i++)
-			close(i);
+		close_extra();
+		bufsz = strlen("exec ") + strlen(host) + strlen(" ") + strlen(plugin->dll) + sizeof('\0');
+		cmd = alloca(bufsz);
+		snprintf(cmd, bufsz, "exec %s %s", host, plugin->dll);
 		execl("/bin/sh", "sh", "-c", cmd, NULL);
-		perror("dsp_winamp: exec");
+		perror("execl");
 		_exit(EXIT_FAILURE);
 	} else {
 		close(stdin[0]);
@@ -128,19 +135,39 @@ failed:
 		plugin->child.pid = pid;
 		plugin->child.stdin = stdin[1];
 		plugin->child.stdout = stdout[0];
+		return true;
+	}
+}
+
+static void
+__attribute__((cold))
+child_stop(plugin_t *plugin)
+{
+	if (LIKELY(plugin->child.pid >= 0)) {
+		close(plugin->child.stdin);
+		close(plugin->child.stdout);
+		waitpid(plugin->child.pid, NULL, 0);
+		plugin->child.stdin = -1;
+		plugin->child.stdout = -1;
+		plugin->child.pid = -1;
 	}
 }
 
 static ddb_dsp_context_t *
+__attribute__((cold))
 dsp_winamp_open(void)
 {
 	plugin_t *plugin;
+	char *dll;
 
 	plugin = malloc(sizeof(plugin_t));
+	dll = strdup("");
+	if (UNLIKELY(plugin == NULL || dll == NULL))
+		goto failed;
+
 	DDB_INIT_DSP_CONTEXT(plugin, plugin_t, &g_plugin);
 
-	plugin->dll = strdup("");
-	plugin->dll_exists = false;
+	plugin->dll = dll;
 	plugin->max_bps = 0;
 
 	plugin->child.pid = -1;
@@ -148,9 +175,14 @@ dsp_winamp_open(void)
 	plugin->child.stdout = -1;
 
 	return (ddb_dsp_context_t *)plugin;
+failed:
+	free(plugin);
+	free(dll);
+	return NULL;
 }
 
 static void
+__attribute__((cold))
 dsp_winamp_close(ddb_dsp_context_t *ctx)
 {
 	plugin_t *plugin = (plugin_t *)ctx;
@@ -162,61 +194,61 @@ dsp_winamp_close(ddb_dsp_context_t *ctx)
 }
 
 static bool
+__attribute__((always_inline))
+__attribute__((hot))
 process_check_child(plugin_t *plugin)
 {
-	if (plugin->child.pid < 0) {
+	if (UNLIKELY(plugin->child.pid < 0))
 		child_start(plugin);
-	} else if (waitpid(plugin->child.pid, NULL, WNOHANG) > 0) {
-		plugin->child.pid = -1;
-		child_stop(plugin);
-		child_start(plugin);
-	}
-	return (plugin->child.pid >= 0);
+
+	return LIKELY(plugin->child.pid >= 0);
 }
 
 static bool
-process_write_request(plugin_t *ctx,
+__attribute__((always_inline))
+__attribute__((hot))
+process_write_request(plugin_t *plugin,
                       float *samples,
                       int frames,
                       ddb_waveformat_t *fmt)
 {
-	plugin_t *plugin = (plugin_t *)ctx;
 	struct processing_request request;
 	char *writebuf;
 
-	/* convert if needed */
-	if (fmt->is_float || (plugin->max_bps != 0 && fmt->bps > plugin->max_bps)) {
+	assert(plugin != NULL);
+	assert(samples != NULL);
+	assert(frames > 0);
+	assert(fmt != NULL);
+
+	if (LIKELY(fmt->is_float || (plugin->max_bps != 0 && fmt->bps > plugin->max_bps))) {
 		ddb_waveformat_t convfmt = *fmt;
-		int __attribute__((unused)) rv;
-		if (plugin->max_bps != 0 && fmt->bps > plugin->max_bps)
+		if (LIKELY(plugin->max_bps != 0 && fmt->bps > plugin->max_bps))
 			convfmt.bps = plugin->max_bps;
 		convfmt.is_float = 0;
 		writebuf = alloca(frames*(convfmt.bps/8)*convfmt.channels);
-		rv = g_deadbeef->pcm_convert(
+		g_deadbeef->pcm_convert(
 		    fmt, (char *)samples,
 		    &convfmt, writebuf,
 		    frames*(fmt->bps/8)*fmt->channels);
-		assert(rv == frames*(convfmt.bps/8)*convfmt.channels);
 		fmt->bps = convfmt.bps;
 		fmt->is_float = convfmt.is_float;
-	} else {
+	} else
 		writebuf = (char *)samples;
-	}
 
 	request.buffer_size = frames*(fmt->bps/8)*fmt->channels;
 	request.samplerate = fmt->samplerate;
 	request.bitspersample = fmt->bps;
 	request.channels = fmt->channels;
 
-	if ((size_t)write(plugin->child.stdin, &request, sizeof(request)) != sizeof(request))
-		return false;
-	if ((size_t)write(plugin->child.stdin, writebuf, request.buffer_size) != request.buffer_size)
+	if (UNLIKELY(!write_full(plugin->child.stdin, &request, sizeof(request))))
 		return false;
 
-	return true;
+	return LIKELY(write_full(plugin->child.stdin, writebuf, request.buffer_size));
 }
 
 static bool
+__attribute__((always_inline))
+__attribute__((hot))
 process_read_response(plugin_t *plugin,
                       float *samples,
                       int *frames,
@@ -226,47 +258,47 @@ process_read_response(plugin_t *plugin,
 	struct processing_response response;
 	bool need_f32;
 
-	if ((size_t)read(plugin->child.stdout, &response, sizeof(response)) != sizeof(response))
+	assert(plugin != NULL);
+	assert(samples != NULL);
+	assert(frames != NULL);
+	assert(maxframes > 0);
+	assert(fmt != NULL);
+
+	if (UNLIKELY(!read_full(plugin->child.stdout, &response, sizeof(response))))
 		return false;
+
+	assert(response.buffer_size % ((fmt->bps/8)*fmt->channels) == 0);
 
 	*frames = response.buffer_size/(fmt->bps/8)/fmt->channels;
-
-	if (response.buffer_size == 0)
+	if (UNLIKELY(*frames == 0))
 		return true;
-	if (*frames > maxframes)
-		return false;
-	if (response.buffer_size % ((fmt->bps/8)*fmt->channels) != 0)
+	if (UNLIKELY(*frames > maxframes))
 		return false;
 
-	assert(!fmt->is_float); /* we cleared this earlier */
 	need_f32 = next_dsp_needs_f32(plugin, fmt);
-	if ((need_f32 && !(fmt->bps == 32 && fmt->is_float)) ||
-	    (!g_deadbeef->conf_get_int("ddw.patch1", 0) && fmt->bps != 32)) {
-		char *readbuf = alloca(response.buffer_size);
-		ddb_waveformat_t convfmt = *fmt;
-		int __attribute__((unused)) rv;
-		convfmt.bps = 32;
-		/* only convert to float if we have to */
-		if (need_f32)
-			convfmt.is_float = 1;
-		if ((size_t)read(plugin->child.stdout, readbuf, response.buffer_size) != response.buffer_size)
+	if (LIKELY(((need_f32 && !(fmt->bps == 32 && fmt->is_float)) ||
+	           (fmt->bps != 32 && !have_patch1)))) {
+		char readbuf[response.buffer_size];
+		ddb_waveformat_t convfmt;
+		if (UNLIKELY(!read_full(plugin->child.stdout, readbuf, response.buffer_size)))
 			return false;
-		rv = g_deadbeef->pcm_convert(
+		convfmt = *fmt;
+		convfmt.bps = 32;
+		convfmt.is_float = need_f32;
+		g_deadbeef->pcm_convert(
 		    fmt, readbuf,
 		    &convfmt, (char *)samples,
 		    response.buffer_size);
-		assert(rv == (*frames)*(convfmt.bps/8)*convfmt.channels);
 		fmt->bps = convfmt.bps;
 		fmt->is_float = convfmt.is_float;
+		return true;
 	} else {
-		/* don't need to convert */
-		if ((size_t)read(plugin->child.stdout, (char *)samples, response.buffer_size) != response.buffer_size)
-			return false;
+		return LIKELY(read_full(plugin->child.stdout, (char *)samples, response.buffer_size));
 	}
-	return true;
 }
 
 static int
+__attribute__((hot))
 dsp_winamp_process(ddb_dsp_context_t *ctx,
                    float *samples,
                    int frames,
@@ -274,111 +306,123 @@ dsp_winamp_process(ddb_dsp_context_t *ctx,
                    ddb_waveformat_t *fmt,
                    float *ratio)
 {
-	plugin_t *plugin = (plugin_t *)ctx;
+	plugin_t *plugin;
 	int frames_in = frames;
-	(void)ratio;
 
-	if (ctx->plugin->can_bypass(ctx, fmt))
+	assert(ctx != NULL);
+	assert(samples != NULL);
+	assert(frames > 0);
+	assert(maxframes >= frames);
+	assert(fmt != NULL);
+	assert(SENSIBLE_WAVEFMT(*fmt));
+	assert(ratio != NULL);
+
+	plugin = (plugin_t *)ctx;
+
+	if (UNLIKELY(plugin->dll[0] == '\0' ||
+	             (plugin->dll[0] == '0' && plugin->dll[1] == '\0'))) {
+		/* no dll, convert samples back to float for other dps */
+		if (LIKELY((fmt->bps != 32 && !have_patch1)) ||
+		           (!(fmt->bps == 32 && fmt->is_float) && next_dsp_needs_f32(plugin, fmt))) {
+			char convbuf[frames*sizeof(float)*fmt->channels];
+			ddb_waveformat_t convfmt = *fmt;
+			convfmt.bps = 32;
+			convfmt.is_float = 1;
+			assert((convfmt.bps/fmt->bps)*frames <= maxframes);
+			g_deadbeef->pcm_convert(
+			    fmt, (char *)samples,
+			    &convfmt, convbuf,
+			    frames*(fmt->bps/8)*fmt->channels);
+			memcpy(samples, convbuf, frames*sizeof(float)*fmt->channels);
+			fmt->bps = 32;
+			fmt->is_float = 1;
+		}
 		return frames;
-	/* start child if not running */
-	if (!process_check_child(plugin))
+	}
+
+	if (UNLIKELY(!process_check_child(plugin)))
 		return 0;
 
-	if (!process_write_request(plugin, samples, frames, fmt))
+	if (UNLIKELY(!process_write_request(plugin, samples, frames, fmt)))
 		goto failed;
-	if (!process_read_response(plugin, samples, &frames, maxframes, fmt))
+	if (UNLIKELY(!process_read_response(plugin, samples, &frames, maxframes, fmt)))
 		goto failed;
 
-	if (frames > 0) {
-#ifndef NDEBUG
-		if (!g_deadbeef->conf_get_int("ddw.patch1", 0))
-			assert(fmt->bps == 32);
-		if (next_dsp_needs_f32(plugin, fmt))
-			assert(fmt->bps == 32 && fmt->is_float);
-#endif
+	assert(frames >= 0);
+
+	if (LIKELY(frames > 0))
 		*ratio = ((float)frames_in)/((float)frames);
-	} else
+	else
 		*ratio = 0;
+
 	return frames;
 failed:
-	/* something went wrong, child is probably in an inconsistent state now */
-	fprintf(stderr, "dsp_winamp: something happened!\n");
 	child_stop(plugin);
 	return 0;
 }
 
+static void
+__attribute__((cold))
+dsp_winamp_reset(ddb_dsp_context_t *ctx)
+{
+	assert(ctx != NULL);
+
+	have_patch1 = g_deadbeef->conf_get_int("ddw.patch1", 0);
+}
+
+#define NUM_PARAMS 2
+
 static int
+__attribute__((cold))
 dsp_winamp_num_params(void)
 {
-	return 2;
+	return NUM_PARAMS;
 }
 
 static const char *
+__attribute__((cold))
 dsp_winamp_get_param_name(int p)
 {
+	assert(p >= 0 && p < NUM_PARAMS);
+
 	switch (p) {
 	case 0:
 		return "Path to plugin";
 	case 1:
 		return "Max. bit depth";
-	}
-	return NULL;
-}
-
-static const char code[] =
-	"f() {\n"
-	"    [ $# -gt 0 ] || exit 1\n"
-	"    for f; do\n"
-	"        f=${f%:[0-9]}\n"
-	"        [ -f \"$f\" -a -r \"$f\" ] && continue\n"
-	"        >&2 echo \"dsp_winamp: dll not found: $f\"\n"
-	"        exit 1\n"
-	"    done\n"
-	"    exit 0\n"
-	"}\n"
-	"f";
-
-static bool
-dll_exists(const char *dll)
-{
-	char cmd[sizeof(code) + 1 + strlen(dll) + 1];
-	pid_t pid;
-
-	sprintf(cmd, "%s %s", code, dll);
-	pid = fork();
-	if (pid < 0) {
-		perror("dsp_winamp: fork");
-		return true;
-	} else if (pid == 0) {
-		execl("/bin/sh", "sh", "-c", cmd, NULL);
-		perror("dsp_winamp: exec");
-		_exit(EXIT_FAILURE);
-	} else {
-		int status;
-		waitpid(pid, &status, 0);
-		return WIFEXITED(status) && WEXITSTATUS(status) == 0;
+	default:
+		return NULL;
 	}
 }
 
 static void
+__attribute__((hot))
 dsp_winamp_set_param(ddb_dsp_context_t *ctx, int p, const char *val)
 {
-	plugin_t *plugin = (plugin_t *)ctx;
+	plugin_t *plugin;
+
+	assert(ctx != NULL);
+	assert(p >= 0 && p < NUM_PARAMS);
+	assert(val != NULL);
+
+	plugin = (plugin_t *)ctx;
 
 	switch (p) {
-	case 0:
-		if (strcmp(val, plugin->dll) != 0) {
-			child_stop(plugin);
-			free(plugin->dll);
-			plugin->dll = strdup(val);
-			plugin->dll_exists = dll_exists(plugin->dll);
-			if (!plugin->dll_exists)
-				g_deadbeef->log("dsp_winamp: dll not found: %s\n", plugin->dll);
-		}
+	case 0: {
+		char *dll2;
+		if (strcmp(val, plugin->dll) == 0)
+			break;
+		dll2 = strdup(val);
+		if (UNLIKELY(dll2 == NULL))
+			break;
+		child_stop(plugin);
+		free(plugin->dll);
+		plugin->dll = dll2;
 		break;
+	}
 	case 1:
 		plugin->max_bps = atoi(val);
-		if (plugin->max_bps % 8 != 0 || plugin->max_bps > 32) {
+		if (UNLIKELY(plugin->max_bps % 8 != 0 || plugin->max_bps > 32)) {
 			g_deadbeef->log("dsp_winamp: invalid bit depth\n");
 			plugin->max_bps = 0;
 		}
@@ -387,9 +431,17 @@ dsp_winamp_set_param(ddb_dsp_context_t *ctx, int p, const char *val)
 }
 
 static void
+__attribute__((cold))
 dsp_winamp_get_param(ddb_dsp_context_t *ctx, int p, char *str, int len)
 {
-	plugin_t *plugin = (plugin_t *)ctx;
+	plugin_t *plugin;
+
+	assert(ctx != NULL);
+	assert(p >= 0 && p < NUM_PARAMS);
+	assert(str != NULL);
+	assert(len > 0);
+
+	plugin = (plugin_t *)ctx;
 
 	switch (p) {
 	case 0:
@@ -398,16 +450,34 @@ dsp_winamp_get_param(ddb_dsp_context_t *ctx, int p, char *str, int len)
 	case 1:
 		snprintf(str, len, "%u", plugin->max_bps);
 		break;
+	default:
+		str[0] = '\0';
+		break;
 	}
 }
 
 static int
+__attribute__((cold))
 dsp_winamp_can_bypass(ddb_dsp_context_t *ctx, ddb_waveformat_t *fmt)
 {
-	plugin_t *plugin = (plugin_t *)ctx;
-	(void)fmt;
+	plugin_t *plugin;
 
-	return !plugin->dll_exists;
+	assert(ctx != NULL);
+	assert(fmt != NULL);
+	assert(SENSIBLE_WAVEFMT(*fmt));
+
+	plugin = (plugin_t *)ctx;
+
+	if (UNLIKELY(plugin->dll[0] == '\0' ||
+	             (plugin->dll[0] == '0' && plugin->dll[1] == '\0'))) {
+		if (LIKELY((fmt->bps != 32 && !have_patch1) ||
+		           (!(fmt->bps == 32 && fmt->is_float) && next_dsp_needs_f32(plugin, fmt)))) {
+			return false;
+		}
+		return true;
+	}
+
+	return false;
 }
 
 static DB_dsp_t g_plugin = {
@@ -415,10 +485,12 @@ static DB_dsp_t g_plugin = {
 	DDB_REQUIRE_API_VERSION(1, DDB_API_LEVEL)
 	.plugin.id = "dsp_winamp",
 	.plugin.name = "winamp dsp",
+	.plugin.descr = "",
 	.plugin.website = "https://github.com/huglovefan/ddb_dsp_winamp",
 	.open = dsp_winamp_open,
 	.close = dsp_winamp_close,
 	.process = dsp_winamp_process,
+	.reset = dsp_winamp_reset,
 	.num_params = dsp_winamp_num_params,
 	.get_param_name = dsp_winamp_get_param_name,
 	.set_param = dsp_winamp_set_param,
@@ -435,6 +507,7 @@ static DB_dsp_t g_plugin = {
 DB_plugin_t *
 dsp_winamp_load(DB_functions_t *api)
 {
+	assert(api != NULL);
 	g_deadbeef = api;
 	return &g_plugin.plugin;
 }
