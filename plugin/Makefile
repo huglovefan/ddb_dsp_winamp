@@ -1,5 +1,11 @@
-CFLAGS ?= -O2 -fstack-clash-protection -fstack-protector-strong -ggdb3
-PREFIX ?= $(HOME)/.local
+CFLAGS ?= -O2 -fstack-clash-protection -g
+CPPFLAGS ?= -D_FORTIFY_SOURCE=2
+
+DESTDIR     ?=
+PREFIX      ?= $(HOME)/.local
+EXEC_PREFIX ?= $(PREFIX)
+BINDIR      ?= $(EXEC_PREFIX)/bin
+LIBDIR      ?= $(EXEC_PREFIX)/lib
 
 override CFLAGS := -Wall -Wextra -Wpedantic -Wdeclaration-after-statement -std=c99 \
                    -fPIC -shared \
@@ -14,12 +20,11 @@ override CPPFLAGS := -DDDB_API_LEVEL=10 -DDDB_WARN_DEPRECATED=1 \
 dsp_winamp.so: ../common.h plugin.c
 	$(CC) $(LDFLAGS) $(CFLAGS) $(CPPFLAGS) plugin.c -o $@
 
-# todo: /lib part should be configurable
 install:
-	@install -Dv dsp_winamp.so $(DESTDIR)$(PREFIX)/lib/deadbeef/dsp_winamp.so
+	@install -Dv dsp_winamp.so $(DESTDIR)$(LIBDIR)/deadbeef/dsp_winamp.so
 
 uninstall:
-	@rm -v $(DESTDIR)$(PREFIX)/lib/deadbeef/dsp_winamp.so
+	@rm -v $(DESTDIR)$(LIBDIR)/deadbeef/dsp_winamp.so
 
 clean:
 	-@rm -v dsp_winamp.so
