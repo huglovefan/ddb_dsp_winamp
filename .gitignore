@@ -1,4 +1,8 @@
+/.wine/
 /WA5.55_SDK.exe
 /Winamp SDK/
 *.exe
+*.o
+*.ogg
 *.so
+*.wav
