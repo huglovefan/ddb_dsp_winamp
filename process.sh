@@ -1,48 +1,57 @@
 #!/bin/sh
 
-if ! command -v ddw_host.exe >/dev/null && [ -x host/ddw_host.exe ]; then
-	PATH=$PATH:$PWD/host
-fi
-
 err=
-for exe in ffmpeg ffprobe ddw_host.exe; do
+for exe in ffmpeg ffprobe bc pv; do
 	command -v "$exe" >/dev/null || "$exe" || err=1
 done
-[ -z "$err" ] || exit
+if [ -z "$HOST_CMD" ]; then
+	command -v wine >/dev/null || wine || err=1
+	[ -x ./host/ddw_host.exe ] || ./host/ddw_host.exe || err=1
+fi
 
 Barg=
-farg=
+Sarg=
+iarg=
 oarg=
 sarg=
 wflag=
-while getopts 'B:f:o:s:w' o; do
+while getopts 'B:S:i:o:s:w' o; do
 	case $o in
-	[Bfos]) eval "${o}arg=\$OPTARG";;
+	[BSios]) eval "${o}arg=\$OPTARG";;
 	w) wflag=1;;
 	*) exit 1;;
 	esac
 done
 shift $(( OPTIND - 1 ))
 
-if [ -z "$farg" -o -z "$oarg" -o $# -eq 0 ]; then
+if [ -z "$iarg" -o -z "$oarg" -o $# -eq 0 ]; then
+	if [ -n "$err" ]; then
+		>&2 echo "warning: some required programs are missing"
+	fi
 	cat <<- EOF >&2
 	usage: ${0##*/} <options> [--] <dll> ...
 	options:
 	    -B <bps>   maximum bit depth for the dsp
-	    -f <file>  input file (required)
+	    -i <file>  input file (required)
 	    -o <file>  output file (required)
+	    -S <sec>   feed the dsp this many seconds of silence before the file
 	    -s <sec>   feed the dsp this many seconds of silence after the file
 	    -w         wait for a keypress before processing
+	environment variables:
+	    HOST_CMD   command to run ddw_host.exe (default: "wine ./host/ddw_host.exe")
 	EOF
 	exit 1
 fi
 
+if [ -n "$err" ]; then
+	>&2 echo "error: missing required programs, exiting"
+	exit 1
+fi
+
 get_file_info() {
-	info=$(ffprobe -v error \
-	               -hide_banner \
-	               -show_entries stream=channels,sample_rate,bits_per_sample \
+	info=$(Ffprobe -show_entries stream=channels,sample_rate,bits_per_sample,duration \
 	               -of default=noprint_wrappers=1 \
-	               -- "$farg")
+	               -- "$iarg")
 	if [ $? -ne 0 ]; then
 		return 1
 	fi
@@ -50,7 +59,11 @@ get_file_info() {
 	sample_rate=
 	channels=
 	bits_per_sample=
+	duration=
 	eval "$info"
+	if [ "$bits_per_sample" = "0" ]; then # .ogg has a zero here
+		bits_per_sample=16
+	fi
 	if [ -z "$sample_rate" -o -z "$channels" -o -z "$bits_per_sample" ]; then
 		return 1
 	fi
@@ -63,30 +76,39 @@ get_file_info() {
 }
 
 stuff() {
-	# need to wait?
 	if [ -n "$wflag" ]; then
 		>&2 echo '>> Press enter to begin.'
 		read -r _ 0<>/dev/tty 1>&0 2>&0
 	fi
+	if [ -n "$Sarg" ]; then
+		Ffmpeg -f lavfi -i anullsrc -t "$Sarg" -f "s${BPS}le" -ac "$CH" -ar "$SR" pipe:1
+	fi
 	cat
-	# need to insert silence?
 	if [ -n "$sarg" ]; then
-		>&2 echo ">> Writing ${sarg} second(s) of silence..."
-		ffmpeg -v error -f lavfi -i anullsrc -t "$sarg" -f "s${BPS}le" -ac "$CH" -ar "$SR" pipe:1
+		Ffmpeg -f lavfi -i anullsrc -t "$sarg" -f "s${BPS}le" -ac "$CH" -ar "$SR" pipe:1
 	fi
 }
 
 # wait until there's data on stdin, then run the command
-whenready() {
+ondata() {
 	b=$(dd bs=1 count=1 2>/dev/null | od -A n -t x1)
 	b=${b# }; b=${b#0}; b=${b%% *}
 	if [ -z "$b" ]; then
 		return 1
 	fi
-	(
-		/usr/bin/printf "\\x${b}" # fixme: unportable
+	{
+		# needs a printf with hex escape support
+		"$(which printf)" "\\x${b}"
 		cat
-	) | "$@"
+	} | "$@"
+}
+
+Ffprobe() {
+	ffprobe -v error "$@"
+}
+Ffmpeg() {
+	ffmpeg -nostdin -v error -y "$@"
+	# alias doesn't work if you run it through "$@"
 }
 
 get_file_info || exit
@@ -96,7 +118,12 @@ export SR="$sample_rate"
 export BPS="$bits_per_sample"
 export CH="$channels"
 
-ffmpeg -v error -stats -nostdin -i "$farg" -f "s${BPS}le" pipe:1 <&- | \
+# this is absolutely essential
+bytes=$(echo "(${Sarg:-0}+${duration}+${sarg:-0})*${sample_rate}*(${bits_per_sample}/8)*${channels}" | bc)
+bytes=${bytes%%.*}
+
+Ffmpeg -i "$iarg" -f "s${BPS}le" pipe:1 | \
     stuff | \
-    ddw_host.exe "$@" | \
-    whenready ffmpeg -y -v error -f "s${BPS}le" -ac "$CH" -ar "$SR" -i pipe:0 -- "$oarg"
+    ${HOST_CMD:-wine host/ddw_host.exe} "$@" | \
+    ondata pv -s "$bytes" | \
+    ondata Ffmpeg -f "s${BPS}le" -ac "$CH" -ar "$SR" -i pipe:0 -- "$oarg"
