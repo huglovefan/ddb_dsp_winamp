@@ -1,40 +1,54 @@
-CFLAGS ?= -O2 -fstack-clash-protection -fstack-protector-strong -ggdb3
-PREFIX ?= $(HOME)/.local
+CPPFLAGS ?= -D_GLIBCXX_ASSERTIONS
+CXXFLAGS ?= -O2 -fstack-clash-protection -fstack-protector-strong -g -pipe
 
-ifeq (, $(WINCC))
- ifneq (, $(shell sh -c 'command -v i686-w64-mingw32-gcc'))
-  WINCC := i686-w64-mingw32-gcc
- else
-  ifneq (, $(shell sh -c 'command -v winegcc'))
-   WINCC := winegcc -m32 -mno-cygwin
-   override CFLAGS := $(CFLAGS) -fno-lto
-   override LDFLAGS := $(LDFLAGS) -fno-lto
-  else
-   $(error No usable compiler found)
-  endif
- endif
-endif
+WINCXX ?= i686-w64-mingw32-g++
+
+DESTDIR     ?=
+PREFIX      ?= $(HOME)/.local
+EXEC_PREFIX ?= $(PREFIX)
+BINDIR      ?= $(EXEC_PREFIX)/bin
+LIBDIR      ?= $(EXEC_PREFIX)/lib
 
 WINAMP_INCDIR ?= ../Winamp SDK
 
-override CFLAGS := -I "$(WINAMP_INCDIR)" \
-                   -Wall -Wextra -Wpedantic -Wdeclaration-after-statement -std=gnu99 \
-                   -fno-strict-aliasing \
-                   $(CFLAGS)
+override CPPFLAGS := -I "$(WINAMP_INCDIR)" \
+                     -D WIN32_LEAN_AND_MEAN \
+                     $(CPPFLAGS)
 
-.PHONY: install uninstall clean
+override CXXFLAGS := -Wall -Wextra -Wpedantic \
+                     -std=gnu++20 \
+                     $(CXXFLAGS)
 
-ddw_host.exe: ../common.h main.c
-	$(WINCC) $(LDFLAGS) $(CFLAGS) $(CPPFLAGS) main.c -o $@
+override LDFLAGS := -static \
+                    $(LDFLAGS)
+
+override CXXFLAGS := -fstack-protector-strong  $(CXXFLAGS)
+
+ifeq ($(ANAL), 1)
+  override CXXFLAGS := -fanalyzer  $(CXXFLAGS)
+endif
+
+override CXXFLAGS := -flto=auto  $(CXXFLAGS)
+override LDFLAGS  := $(CXXFLAGS) $(LDFLAGS)
+
+.PHONY: install uninstall clean test
+
+OBJS = main.o plugin.o thread.o dll.o
+
+ddw_host.exe: $(OBJS)
+	$(WINCXX) $(LDFLAGS) $^ -o $@
+
+.cpp.o:
+	$(WINCXX) -c $(CXXFLAGS) $(CPPFLAGS) $< -o $@
 
 install:
-	@install -Dv ddw_host.exe $(DESTDIR)$(PREFIX)/bin/ddw_host.exe; \
-	if [ -e ddw_host.exe.so ]; then install -Dv ddw_host.exe.so $(DESTDIR)$(PREFIX)/bin/ddw_host.exe.so; fi
+	@install -Dv ddw_host.exe $(DESTDIR)$(BINDIR)/ddw_host.exe
 
 uninstall:
-	@rm -v $(DESTDIR)$(PREFIX)/bin/ddw_host.exe; \
-	if [ -e $(DESTDIR)$(PREFIX)/bin/ddw_host.exe.so ]; then rm -v $(DESTDIR)$(PREFIX)/bin/ddw_host.exe.so; fi
+	@rm -v $(DESTDIR)$(BINDIR)/ddw_host.exe
 
 clean:
-	-@rm -v ddw_host.exe; \
-	if [ -e ddw_host.exe.so ]; then rm -v ddw_host.exe.so; fi
+	-@rm -v ddw_host.exe
+
+test:
+	cd .. && sh test.sh
