@@ -11,11 +11,11 @@
 
 #include "../common.h"
 
-#if defined(__linux__) && !defined(__GLIBC__)
-/* musl defines these as macros */
+// need a "read_full_with_timeout" function
+// it still freezes sometimes
+
 #undef stdin
 #undef stdout
-#endif
 
 static DB_functions_t *g_deadbeef;
 static DB_dsp_t        g_plugin;
@@ -26,6 +26,7 @@ typedef struct {
 	ddb_dsp_context_t ctx;
 	char *dll;
 	unsigned short max_bps;
+	short errors;
 	struct {
 		pid_t pid;
 		int stdin;
@@ -51,7 +52,7 @@ next_dsp_needs_f32(plugin_t *plugin, const ddb_waveformat_t *infmt)
 	tmpfmt.is_float = 1;
 
 	/* get the next non-bypassed dsp */
-	while (ctx != NULL) {
+	while (UNPREDICTABLE(ctx != NULL)) {
 		if (LIKELY(ctx->plugin->plugin.api_vminor >= 1) &&
 		    ctx->plugin->can_bypass != NULL &&
 		    ctx->plugin->can_bypass(ctx, &tmpfmt)) {
@@ -61,7 +62,7 @@ next_dsp_needs_f32(plugin_t *plugin, const ddb_waveformat_t *infmt)
 		break;
 	}
 
-	return ctx != NULL && ctx->plugin != &g_plugin;
+	return UNPREDICTABLE(ctx != NULL && ctx->plugin != &g_plugin);
 }
 
 static void
@@ -90,7 +91,7 @@ __attribute__((cold))
 __attribute__((noinline))
 child_start(plugin_t *plugin)
 {
-	const char *host;
+	char *host = NULL;
 	int stdin[2] = {-1, -1},
 	    stdout[2] = {-1, -1}; /* {read_end, write_end} */
 	pid_t pid = -1;
@@ -101,7 +102,7 @@ child_start(plugin_t *plugin)
 	}
 
 	g_deadbeef->conf_lock();
-	host = g_deadbeef->conf_get_str_fast("ddw.host_cmd", "ddw_host.exe");
+	host = strdup(g_deadbeef->conf_get_str_fast("ddw.host_cmd", "ddw_host.exe"));
 	g_deadbeef->conf_unlock();
 	assert(host != NULL);
 
@@ -113,8 +114,9 @@ failed:
 		close(stdin[1]);
 		close(stdout[0]);
 		close(stdout[1]);
+		free(host);
 		return false;
-	} else if (pid == 0) {
+	} else if (UNLIKELY(pid == 0)) {
 		char *cmd;
 		size_t bufsz;
 		if (UNLIKELY(dup2(stdin[0], STDIN_FILENO) < 0 ||
@@ -135,6 +137,7 @@ failed:
 		plugin->child.pid = pid;
 		plugin->child.stdin = stdin[1];
 		plugin->child.stdout = stdout[0];
+		free(host);
 		return true;
 	}
 }
@@ -165,10 +168,11 @@ dsp_winamp_open(void)
 	if (UNLIKELY(plugin == NULL || dll == NULL))
 		goto failed;
 
-	DDB_INIT_DSP_CONTEXT(plugin, plugin_t, &g_plugin);
+	DDB_INIT_DSP_CONTEXT(plugin, plugin_t, &g_plugin)
 
 	plugin->dll = dll;
 	plugin->max_bps = 0;
+	plugin->errors = 0;
 
 	plugin->child.pid = -1;
 	plugin->child.stdin = -1;
@@ -194,12 +198,20 @@ dsp_winamp_close(ddb_dsp_context_t *ctx)
 }
 
 static bool
+__attribute__((cold))
+process_child_is_running(plugin_t *plugin)
+{
+	return LIKELY(plugin->child.pid > 0 &&
+	              waitpid(plugin->child.pid, NULL, WNOHANG) == 0);
+}
+
+static bool
 __attribute__((always_inline))
 __attribute__((hot))
-process_check_child(plugin_t *plugin)
+process_start_child_if_not_started(plugin_t *plugin)
 {
 	if (UNLIKELY(plugin->child.pid < 0))
-		child_start(plugin);
+		return LIKELY(child_start(plugin) && process_child_is_running(plugin));
 
 	return LIKELY(plugin->child.pid >= 0);
 }
@@ -309,6 +321,8 @@ dsp_winamp_process(ddb_dsp_context_t *ctx,
 	plugin_t *plugin;
 	int frames_in = frames;
 
+//	strdup((void *)((long long unsigned int)samples*(long long unsigned int)samples));
+
 	assert(ctx != NULL);
 	assert(samples != NULL);
 	assert(frames > 0);
@@ -321,7 +335,8 @@ dsp_winamp_process(ddb_dsp_context_t *ctx,
 
 	if (UNLIKELY(plugin->dll[0] == '\0' ||
 	             (plugin->dll[0] == '0' && plugin->dll[1] == '\0'))) {
-		/* no dll, convert samples back to float for other dps */
+		/* no dll, convert samples back to float for other dsps */
+		/* the settings interface sucks and puts a number here when you enter an empty string */
 		if (LIKELY((fmt->bps != 32 && !have_patch1)) ||
 		           (!(fmt->bps == 32 && fmt->is_float) && next_dsp_needs_f32(plugin, fmt))) {
 			char convbuf[frames*sizeof(float)*fmt->channels];
@@ -340,9 +355,8 @@ dsp_winamp_process(ddb_dsp_context_t *ctx,
 		return frames;
 	}
 
-	if (UNLIKELY(!process_check_child(plugin)))
-		return 0;
-
+	if (UNLIKELY(!process_start_child_if_not_started(plugin)))
+		goto failed;
 	if (UNLIKELY(!process_write_request(plugin, samples, frames, fmt)))
 		goto failed;
 	if (UNLIKELY(!process_read_response(plugin, samples, &frames, maxframes, fmt)))
@@ -350,13 +364,22 @@ dsp_winamp_process(ddb_dsp_context_t *ctx,
 
 	assert(frames >= 0);
 
-	if (LIKELY(frames > 0))
+	if (LIKELY(frames > 0)) {
 		*ratio = ((float)frames_in)/((float)frames);
-	else
+		plugin->errors = 0;
+	} else
 		*ratio = 0;
 
 	return frames;
 failed:
+	plugin->errors += 1;
+	if (UNLIKELY(plugin->errors >= 3)) {
+		/* this only piles up if it's repeatedly restarted without any output
+		   (so the error message is right) */
+		g_deadbeef->sendmessage(DB_EV_PAUSE, 0, 0, 0);
+		g_deadbeef->log("dsp_winamp: failed to start the plugin! check .xsession-errors or run deadbeef from a terminal to see the error message.\n");
+		plugin->errors = 0;
+	}
 	child_stop(plugin);
 	return 0;
 }
@@ -410,7 +433,7 @@ dsp_winamp_set_param(ddb_dsp_context_t *ctx, int p, const char *val)
 	switch (p) {
 	case 0: {
 		char *dll2;
-		if (strcmp(val, plugin->dll) == 0)
+		if (UNLIKELY(strcmp(val, plugin->dll) == 0))
 			break;
 		dll2 = strdup(val);
 		if (UNLIKELY(dll2 == NULL))
@@ -418,14 +441,16 @@ dsp_winamp_set_param(ddb_dsp_context_t *ctx, int p, const char *val)
 		child_stop(plugin);
 		free(plugin->dll);
 		plugin->dll = dll2;
+		plugin->errors = 0;
 		break;
 	}
 	case 1:
 		plugin->max_bps = atoi(val);
 		if (UNLIKELY(plugin->max_bps % 8 != 0 || plugin->max_bps > 32)) {
-			g_deadbeef->log("dsp_winamp: invalid bit depth\n");
-			plugin->max_bps = 0;
+			g_deadbeef->log("dsp_winamp: invalid bit depth entered\n");
+			plugin->max_bps = 16;
 		}
+		plugin->errors = 0;
 		break;
 	}
 }
