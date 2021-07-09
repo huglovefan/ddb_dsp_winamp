@@ -54,6 +54,15 @@ ddw_host.exe: $(OBJS)
 .c.o:
 	$(CC) -c $(CPPFLAGS) $(CFLAGS) $< -o $@
 
+install:
+	@echo; \
+	echo "To install ddw_host.exe, set \"Host command\" in the deadbeef plugin configuration to the correct value:"; \
+	case $$PWD in \
+	"$$HOME"/*) echo "  wine ~/$${PWD#"$$HOME"/}/ddw_host.exe";; \
+	*) echo "  wine $$PWD/ddw_host.exe";; \
+	esac; \
+	echo
+
 clean:
 	@rm -fv -- $(OBJS:.o=.d) $(OBJS) ddw_host.exe
 
