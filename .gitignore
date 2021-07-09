@@ -1,0 +1,6 @@
+/Winamp SDK/
+*.d
+*.dll
+*.exe
+*.o
+*.so
