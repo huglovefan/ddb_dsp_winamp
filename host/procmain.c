@@ -41,6 +41,7 @@ process_thread_main(void *ud)
 
 		if U (!fmt_same(&fmt, &oldfmt)) {
 			bool warn = false;
+			const char *what;
 
 			fprintf(stderr, "format change: rate=%d bps=%d ch=%d\n",
 			    fmt.rate, fmt.bps, fmt.ch);
@@ -49,6 +50,24 @@ process_thread_main(void *ud)
 				if (plugins[i].buf.sz != 0) {
 					plugins[i].buf.sz = 0;
 					warn = true;
+				}
+
+				//
+				// re-check compatibility
+				//
+				plugins[i].skip = false;
+				what = plugin_supports_format(&plugins[i], &fmt);
+				if (what != NULL) {
+					if (plugins[i].opts.required) {
+						fprintf(stderr, "error: required plugin %s doesn't support this %s, exiting\n",
+						    superbasename(plugins[i].opts.path),
+						    what);
+						goto err;
+					}
+					fprintf(stderr, "warning: disabling %s due to unsupported %s\n",
+					    superbasename(plugins[i].opts.path),
+					    what);
+					plugins[i].skip = true;
 				}
 			}
 			if (warn)
@@ -66,6 +85,8 @@ process_thread_main(void *ud)
 		buf_register_append(&data, req.buffer_size);
 
 		for (unsigned int i = 0; i < plugins_cnt; i++) {
+			if (plugins[i].skip)
+				continue;
 			procidx = i;
 			plugin_process(&plugins[i], &fmt, &data, &tmp);
 			if (data.sz == 0)

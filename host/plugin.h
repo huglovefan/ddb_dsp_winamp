@@ -16,6 +16,8 @@ struct plugin {
 	struct buf buf;
 
 	struct plugin_options {
+		int trace;
+
 #define MODULE_IDX_DEFAULT -1
 		int module_idx;
 		int process_min_frames;
@@ -24,11 +26,18 @@ struct plugin {
 		int may_stretch;
 		int doconf;
 		int randomize;
+		int required;
 		char *path;
+		char *rate;
+		char *bits;
+		char *ch;
 	} opts;
 
 	int random_cnt;
 	size_t lastbufsz;
+
+	int skip;
+	int didconf;
 
 	HMODULE dll;
 };
@@ -43,6 +52,9 @@ load_plugin(struct plugin *pl);
 
 void
 plugin_randomize_opts(struct plugin *pl);
+
+const char *
+plugin_supports_format(struct plugin *pl, struct fmt *fmt);
 
 /// plugproc.c
 

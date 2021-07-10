@@ -89,6 +89,7 @@ conf_thread_main(void *ud)
 {
 	struct plugin *pl = ud;
 	pl->module->Config(pl->module);
+	pl->didconf = 1;
 	return 0;
 }
 
@@ -234,9 +235,12 @@ D	fprintf(stderr, "ddw_host.exe: debug checks are enabled\n");
 	for (unsigned int i = 0; i < plugins_cnt; i++) {
 		HANDLE confthread;
 
-		if (!plugins[i].opts.doconf)
+		if (!plugins[i].opts.doconf) {
+			plugins[i].didconf = -1;
 			continue;
+		}
 
+		plugins[i].didconf = 0;
 		confthread = CreateThread(NULL,
 					  0,
 					  conf_thread_main,
@@ -245,6 +249,7 @@ D	fprintf(stderr, "ddw_host.exe: debug checks are enabled\n");
 					  NULL);
 		if (confthread == NULL) {
 			PrintError("CreateThread");
+			plugins[i].didconf = -1;
 			continue;
 		}
 
@@ -273,8 +278,11 @@ out:
 
 	while (plugins_cnt > 0) {
 		struct plugin *pl = &plugins[plugins_cnt-1];
-		pl->module->Quit(pl->module);
-		FreeLibrary(pl->dll);
+		// don't free it if we still haven't finished calling Config()
+		if (pl->didconf != 0) {
+			pl->module->Quit(pl->module);
+			FreeLibrary(pl->dll);
+		}
 		buf_free(&pl->buf);
 		plugins_cnt--;
 	}

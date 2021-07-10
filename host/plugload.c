@@ -15,17 +15,38 @@ apply_defaults(const char *path, struct plugin_options *out)
 {
 	const char *dllname = superbasename(path);
 
-	if (strstr(dllname, "centercut") != NULL) {
+	if (strcmp(dllname, "dsp_centercut.dll") == 0) {
 		out->doconf = 0;
-	} else if (strstr(dllname, "freeverb") != NULL) {
+		// 8 = loud
+		out->bits = strdup("16,24,32");
+	}
+
+	else if (strcmp(dllname, "dsp_freeverb.dll") == 0) {
 		out->may_stretch = false;
-	} else if (strstr(dllname, "pacemaker") != NULL) {
+		// 24 = static. i wonder if the others just happen to work
+		//  because they're multiples of 8
+		out->bits = strdup("8,16,32");
+	}
+
+	else if (strcmp(dllname, "dsp_pacemaker.dll") == 0) {
 		// 576*3 may be buggy
 		out->process_max_frames = 576*2;
 		out->doconf = 0;
-	} else if (strstr(dllname, "stereo_tool") != NULL) {
+		// 8 = distorts when stretching
+		out->bits = strdup("16,24,32");
+	}
+
+	else if (strcmp(dllname, "dsp_sps.dll") == 0) {
+		// only 16 works properly
+		out->bits = strdup("16");
+	}
+
+	else if (strcmp(dllname, "dsp_stereo_tool.dll") == 0) {
 		out->process_max_frames = 0;
 		out->may_stretch = false;
+		// 8 = loud
+		out->bits = strdup("16,24,32");
+		out->required = true;
 	}
 }
 
@@ -38,15 +59,23 @@ parse_plugin_options(const char *arg, struct plugin_options *out)
 	const struct option {
 		const char *name;
 		char type;
-		int *p;
+		union {
+			int *i;
+			char **s;
+		} v;
 	} options[] = {
-		{"pmf", 'u', &out->process_min_frames},
-		{"pMf", 'u', &out->process_max_frames},
-		{"pfm", 'u', &out->process_frames_mult},
-		{"stretch", 'b', &out->may_stretch},
-		{"conf", 'b', &out->doconf},
-		{"randomize", 'b', &out->randomize},
-		{NULL, 0, NULL},
+		{"pmf", 'u', {.i=&out->process_min_frames}},
+		{"pMf", 'u', {.i=&out->process_max_frames}},
+		{"pfm", 'u', {.i=&out->process_frames_mult}},
+		{"stretch", 'b', {.i=&out->may_stretch}},
+		{"conf", 'b', {.i=&out->doconf}},
+		{"randomize", 'b', {.i=&out->randomize}},
+		{"required", 'b', {.i=&out->required}},
+		{"trace", 'b', {.i=&out->trace}},
+		{"rate", 's', {.s=&out->rate}},
+		{"bits", 's', {.s=&out->bits}},
+		{"ch", 's', {.s=&out->ch}},
+		{NULL, 0, {NULL}},
 	};
 
 	s = strdup(arg);
@@ -62,12 +91,15 @@ parse_plugin_options(const char *arg, struct plugin_options *out)
 	// "numsamples should always be at least 128. should, but I'm not sure"
 	// should process_min_frames be 128 then? i'm not sure
 
+	// pmf and pfm default to 32 to solve weirdness with non-power-of-two
+	//  buffer sizes (24-bit flac)
+
 	*out = (struct plugin_options){
 		.path = NULL,
 		.module_idx = MODULE_IDX_DEFAULT,
-		.process_min_frames = 1,
+		.process_min_frames = 32,
 		.process_max_frames = 576,
-		.process_frames_mult = 1,
+		.process_frames_mult = 32,
 		.may_stretch = 1,
 		.doconf = 1,
 		.randomize = 0,
@@ -116,14 +148,18 @@ match:
 					fprintf(stderr, "missing value for option \"%s\"\n", name);
 					goto err;
 				}
-				if (!atoi_ok(value, opt->p)) {
+				if (!atoi_ok(value, opt->v.i)) {
 					fprintf(stderr, "failed to parse value \"%s\" for option \"%s\"\n", value, name);
 					goto err;
 				}
 				break;
 			case 'b':
 				value = value ?: "1";
-				*opt->p = atoi(value);
+				*opt->v.i = atoi(value);
+				break;
+			case 's':
+				free(*opt->v.s);
+				*opt->v.s = strdup(value);
 				break;
 			default:
 				assert(!"option has invalid type");
@@ -318,4 +354,51 @@ print:
 	    pl->opts.process_frames_mult,
 	    pl->opts.process_min_frames,
 	    pl->opts.process_max_frames);
+}
+
+static bool
+match_string(const char *spec, const char *value)
+{
+	const char *p = spec;
+	const char *end;
+	size_t vallen = strlen(value);
+	size_t ptlen;
+
+	for (;;) {
+		end = strchrnul((char *)p, ',');
+		ptlen = (size_t)(end-p);
+
+		if (ptlen == vallen && memcmp(p, value, vallen) == 0)
+			return true;
+
+		if (*end == '\0')
+			break;
+
+		p = end+1;
+	}
+
+	return false;
+}
+
+const char *
+plugin_supports_format(struct plugin *pl, struct fmt *fmt)
+{
+	char ratestr[16];
+	char bitstr[16];
+	char chstr[16];
+
+	snprintf(ratestr, sizeof(ratestr), "%d", fmt->rate);
+	snprintf(bitstr, sizeof(bitstr), "%d", fmt->bps);
+	snprintf(chstr, sizeof(chstr), "%d", fmt->ch);
+
+	if (pl->opts.rate != NULL && !match_string(pl->opts.rate, ratestr))
+		return "sample rate";
+
+	if (pl->opts.bits != NULL && !match_string(pl->opts.bits, bitstr))
+		return "bit depth";
+
+	if (pl->opts.ch != NULL && !match_string(pl->opts.ch, chstr))
+		return "channel count";
+
+	return NULL;
 }

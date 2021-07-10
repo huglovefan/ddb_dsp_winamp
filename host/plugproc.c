@@ -65,6 +65,11 @@ D	buf_free(tmp);
 	//  with the new data
 	//
 	if U (edible == 0) {
+		if U (pl->opts.trace)
+			fprintf(stderr, "[%s] incoming %d frames not yet edible, adding to buffer\n",
+			    superbasename(pl->opts.path),
+			    fmt_bytes2frames(fmt, data->sz));
+
 		if (pl->buf.sz == 0) {
 			buf_swap(&pl->buf, data);
 		} else {
@@ -77,7 +82,14 @@ D		buf_free(data);
 	}
 
 	// add old saved data to the input buffer
+	// (this sucks and does too much copying)
 	if (pl->buf.sz != 0) {
+		if U (pl->opts.trace)
+			fprintf(stderr, "[%s] took %d frames from temp. buffer, data is now %d frames\n",
+			    superbasename(pl->opts.path),
+			    fmt_bytes2frames(fmt, pl->buf.sz),
+			    fmt_bytes2frames(fmt, pl->buf.sz+data->sz));
+
 		buf_append_buf(&pl->buf, data);
 		buf_clear(data);
 		buf_swap(data, &pl->buf);
@@ -205,6 +217,11 @@ D		assert(buf_boundscheck_write(tmp, writep, 0));
 		const char *rest = readp;
 		size_t rest_sz = readend-rest;
 
+		if U (pl->opts.trace)
+			fprintf(stderr, "[%s] leftover frames after processing: %d\n",
+			    superbasename(pl->opts.path),
+			    fmt_bytes2frames(fmt, rest_sz));
+
 D		assert(buf_boundscheck_read(data, rest, rest_sz)&BUF_RIGHTEDGE);
 
 		// should never ever happen, but: if the unread data is at the
@@ -259,12 +276,21 @@ ModifySamples_s(struct plugin *pl,
 	if (outbuf != inbuf)
 		memmove(outbuf, inbuf, fs**inbuf_frames);
 
+	if U (pl->opts.trace)
+		fprintf(stderr, "[%s] ModifySamples %d",
+		    superbasename(pl->opts.path),
+		    *inbuf_frames);
+
 	plug_rv = pl->module->ModifySamples(pl->module,
 	    (short int *)outbuf,
 	    *inbuf_frames,
 	    fmt->bps,
 	    fmt->ch,
 	    fmt->rate);
+
+	if U (pl->opts.trace)
+		fprintf(stderr, " -> %d\n",
+		    plug_rv);
 
 	if U (plug_rv < 0) {
 		fprintf(stderr, "warning: ModifySamples() for plugin %s returned %d\n",
