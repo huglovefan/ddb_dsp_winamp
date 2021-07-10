@@ -1,6 +1,6 @@
 CC := gcc
 CPPFLAGS := -MMD -MP -D_FORTIFY_SOURCE=2 -D_GNU_SOURCE -DDDB_API_LEVEL=10 -DDDB_WARN_DEPRECATED=1
-CFLAGS := -O2 -fstack-clash-protection -g -fPIC
+CFLAGS := -O2 -fstack-clash-protection -fstack-protector-strong -g -fPIC
 LDFLAGS := -shared
 
 ifneq (,$(LTO))

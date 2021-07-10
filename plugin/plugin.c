@@ -1,5 +1,6 @@
 #include "plugin.h"
 
+#include <assert.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -152,6 +153,9 @@ dsp_winamp_process(ddb_dsp_context_t *ctx,
 	    fmt, &nextfmt,
 	    (char *)samples, frames,
 	    outcap);
+
+	if (frames > 0)
+		assert(memcmp(fmt, &nextfmt, sizeof(ddb_waveformat_t)) == 0);
 
 	if (frames == -1) {
 		frames = 0;

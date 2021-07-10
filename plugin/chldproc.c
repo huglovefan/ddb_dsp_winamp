@@ -13,36 +13,70 @@
 
 // -----------------------------------------------------------------------------
 
+static const char mark1[8] = "password";
+static const char mark2[8] = "zanzibar";
+
+#define MIN(a, b) ((a < b) ? (a) : (b))
+
+// the s stands for silly
 static void
-pcm_convert_s(const ddb_waveformat_t *infmt, const char *inbuf, int in_frames,
-              const ddb_waveformat_t *outfmt, char *outbuf, size_t outbufcap)
+pcm_convert_s(const ddb_waveformat_t *const infmt,
+              const char *const inbuf,
+              int const in_frames,
+              const ddb_waveformat_t *const outfmt,
+              char *const outbuf,
+              size_t const outbufcap)
 {
-	size_t fs_out = fmt_frame_size(outfmt);
-	size_t outbufreq = fs_out*in_frames;
+	const size_t inbufsz = fmt_frames2bytes(infmt, in_frames);
+	const size_t outbufreq = fmt_frames2bytes(outfmt, in_frames);
+
+	char *convbuf = outbuf;
+	size_t convbufcap = outbufcap;
+
+	size_t mark1sz;
+	char *mark1pos = NULL;
+
+	size_t mark2sz;
+	char *mark2pos = NULL;
 
 	assert(outbufcap >= outbufreq);
 
-	//
-	// unfortunately pcm_convert doesn't have a way to signal if conversion failed
-	// https://github.com/DeaDBeeF-Player/deadbeef/blob/master/premix.c
-	//
-
-	if (outbuf != inbuf) {
-		deadbeef->pcm_convert(
-		    infmt, inbuf,
-		    outfmt, outbuf,
-		    fmt_frames2bytes(infmt, in_frames));
-	} else {
-		char *tmpbuf = alloca(outbufreq);
-
-		deadbeef->pcm_convert(
-		    infmt, inbuf,
-		    outfmt, tmpbuf,
-		    fmt_frames2bytes(infmt, in_frames));
-
-		memcpy(outbuf, tmpbuf, outbufreq);
+	if (outbuf == inbuf) {
+		convbufcap = outbufreq+sizeof(mark2);
+		convbuf = alloca(convbufcap);
 	}
 
+	//
+	// verify that pcm_convert() actually does its job
+	// it has no error reporting so this has to be done manually
+	// - write a known string of bytes to the end of the output buffer
+	//   -> will be overwritten if conversion succeeds
+	// - write another one just beyond the end (if there's room)
+	//   -> should never be overwritten
+	//
+
+	mark1sz = MIN(outbufreq, sizeof(mark1));
+	mark1pos = convbuf+outbufreq-mark1sz;
+	memcpy(mark1pos, mark1, mark1sz);
+
+	if (outbufcap > outbufreq) {
+		mark2sz = MIN(outbufcap-outbufreq, sizeof(mark2));
+		mark2pos = convbuf+outbufreq;
+		memcpy(mark2pos, mark2, mark2sz);
+	}
+
+	deadbeef->pcm_convert(
+	    infmt, inbuf,
+	    outfmt, convbuf,
+	    inbufsz);
+
+	if (mark1pos != NULL)
+		assert(memcmp(mark1pos, mark1, mark1sz) != 0);
+	if (mark2pos != NULL)
+		assert(memcmp(mark2pos, mark2, mark2sz) == 0);
+
+	if (convbuf != outbuf)
+		memcpy(outbuf, convbuf, outbufreq);
 }
 
 // -----------------------------------------------------------------------------
