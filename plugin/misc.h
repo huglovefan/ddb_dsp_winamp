@@ -12,7 +12,7 @@
 	(req).buffer_size % (((req).bitspersample/8)*(req).channels) == 0 && \
 	(req).samplerate != 0)
 
-static bool
+static inline bool
 __attribute__((nonnull))
 __attribute__((unused))
 __attribute__((warn_unused_result))
@@ -22,7 +22,7 @@ read_full(int fd, void *data, size_t size)
 	return result >= 0 && (size_t)result == size;
 }
 
-static bool
+static inline bool
 __attribute__((nonnull))
 __attribute__((unused))
 __attribute__((warn_unused_result))
