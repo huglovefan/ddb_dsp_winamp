@@ -293,11 +293,14 @@ ModifySamples_s(struct plugin *pl,
 	}
 
 	if U (plug_rv > *inbuf_frames*pl_stretch_factor) {
-		fprintf(stderr, "warning: %.1fx stretch (%d -> %d) by plugin %s is above MAX_STRETCH_FACTOR %d\n",
+		fprintf(stderr, "warning: %.1fx stretch (%d -> %d) by plugin %s is above %s %d\n",
 		    (float)plug_rv / (float)*inbuf_frames,
 		    *inbuf_frames, plug_rv,
 		    superbasename(pl->opts.path),
-		    MAX_STRETCH_FACTOR);
+		    (pl->opts.may_stretch) ?
+		        "MAX_STRETCH_FACTOR" :
+		        "its allowed stretch factor",
+		    pl_stretch_factor);
 	}
 
 	assert(plug_rv <= *outbuf_frames);
