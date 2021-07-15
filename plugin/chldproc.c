@@ -41,6 +41,18 @@ pcm_convert_s(const ddb_waveformat_t *const infmt,
 
 	assert(outbufcap >= outbufreq);
 
+	// nothing to convert?
+	if (in_frames == 0)
+		return;
+
+	// already the same format?
+	if (memcmp(outfmt, infmt, sizeof(ddb_waveformat_t)) == 0) {
+		if (outbuf != inbuf)
+			memcpy(outbuf, inbuf, inbufsz);
+
+		return;
+	}
+
 	if (outbuf == inbuf) {
 		convbufcap = outbufreq+sizeof(mark2);
 		convbuf = alloca(convbufcap);
