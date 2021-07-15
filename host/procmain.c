@@ -15,6 +15,7 @@ process_thread_main(void *ud)
 	struct buf tmp = {0};
 	struct fmt fmt = {0};
 	struct fmt oldfmt = {0};
+	size_t restotal;
 	int thread_rv = 0;
 	(void)ud;
 
@@ -76,8 +77,15 @@ process_thread_main(void *ud)
 			oldfmt = fmt;
 		}
 
+		restotal = 0;
+		for (unsigned int i = 0; i < plugins_cnt; i++) {
+			if (!plugins[i].skip)
+				restotal += plugins[i].buf.sz;
+		}
+
 		buf_clear(&data);
-		buf_prepare_append(&data, req.buffer_size);
+		buf_prepare_append(&data, restotal+req.buffer_size);
+		buf_set_reserved(&data, restotal);
 
 		if U (!read_full(in_fd, data.p, req.buffer_size))
 			goto readerr;
@@ -85,10 +93,23 @@ process_thread_main(void *ud)
 		buf_register_append(&data, req.buffer_size);
 
 		for (unsigned int i = 0; i < plugins_cnt; i++) {
+			size_t oldtmpsz, oldres, resused;
+
 			if (plugins[i].skip)
 				continue;
+
+			oldtmpsz = plugins[i].buf.sz;
+			oldres = data.res;
+
 			procidx = i;
 			plugin_process(&plugins[i], &fmt, &data, &tmp);
+
+			resused = oldres-data.res;
+
+			// plugin used either 0 reserved space OR the exact old
+			//  size of its tmp buffer
+D			assert(resused == 0 || resused == oldtmpsz);
+
 			if (data.sz == 0)
 				break;
 		}

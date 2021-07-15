@@ -6,25 +6,39 @@
 #include "macros.h"
 
 void
-buf_prepare_append(struct buf *self, size_t sz)
+buf_prepare_capacity(struct buf *self, size_t req)
 {
-	size_t req = self->sz+sz;
+	char *realp;
+	size_t realcap;
 	char *newp;
 	size_t newcap;
 
 	if L (self->cap >= req)
 		return;
 
-	newcap = self->cap ?: 512;
+	// calculations from here on include the reserved space
+
+	realp = (self->p != NULL) ? self->p-self->res : NULL;
+	realcap = self->cap+self->res;
+
+	req += self->res;
+
+	newcap = realcap ?: 512;
 	while (newcap < req)
 		newcap *= 2;
 
-	newp = realloc(self->p, newcap);
+	newp = realloc(realp, newcap);
 	if U (newp == NULL)
 		assert(!"buf_prepare_append: realloc");
 
-	self->p = newp;
-	self->cap = newcap;
+	self->p = newp+self->res;
+	self->cap = newcap-self->res;
+}
+
+void
+buf_prepare_append(struct buf *self, size_t sz)
+{
+	buf_prepare_capacity(self, self->sz+sz);
 }
 
 void
@@ -47,13 +61,20 @@ buf_append(struct buf *self, const char *p, size_t sz)
 void
 buf_clear(struct buf *self)
 {
+	if (self->p != NULL)
+		self->p -= self->res; // rewind to the original pointer
+
 	self->sz = 0;
+	self->cap += self->res; // reclaim any reserved space
+	self->res = 0;
 }
 
 void
 buf_free(struct buf *self)
 {
-	free(self->p);
+	if (self->p != NULL)
+		free(self->p-self->res); // free the original pointer
+
 	*self = (struct buf){0};
 }
 
@@ -70,6 +91,19 @@ buf_append_buf(struct buf *self, struct buf *other)
 {
 	if (other->sz > 0)
 		buf_append(self, other->p, other->sz);
+}
+
+void
+buf_prepend_buf(struct buf *self, struct buf *other)
+{
+	assert(self->res >= other->sz);
+
+	memcpy(self->p-other->sz, other->p, other->sz);
+
+	self->p -= other->sz;
+	self->sz += other->sz;
+	self->cap += other->sz;
+	self->res -= other->sz;
 }
 
 enum buf_bound
@@ -214,4 +248,16 @@ buf_shrink_cap(struct buf *self, size_t sz)
 {
 	assert(sz <= self->cap);
 	self->cap = sz;
+}
+
+void
+buf_set_reserved(struct buf *self, size_t sz)
+{
+	assert(self->sz == 0); // restricted for simplicity
+	assert(sz <= self->cap);
+
+	self->p += sz;
+	self->sz = 0;
+	self->cap -= sz;
+	self->res += sz;
 }

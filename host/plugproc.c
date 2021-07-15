@@ -82,7 +82,6 @@ D		buf_free(data);
 	}
 
 	// add old saved data to the input buffer
-	// (this sucks and does too much copying)
 	if (pl->buf.sz != 0) {
 		if U (pl->opts.trace)
 			fprintf(stderr, "[%s] took %d frames from temp. buffer, data is now %d frames\n",
@@ -90,10 +89,8 @@ D		buf_free(data);
 			    fmt_bytes2frames(fmt, pl->buf.sz),
 			    fmt_bytes2frames(fmt, pl->buf.sz+data->sz));
 
-		buf_append_buf(&pl->buf, data);
-		buf_clear(data);
-		buf_swap(data, &pl->buf);
-D		buf_free(&pl->buf);
+		buf_prepend_buf(data, &pl->buf);
+		buf_clear(&pl->buf);
 	}
 
 	/// warning: obsolete historical comment
@@ -152,14 +149,18 @@ plugin_process_twobuf(struct plugin *pl,
                       struct buf *tmp)
 {
 	const size_t fs = fmt_frame_size(fmt);
-
-	if (tmp != data) buf_clear(tmp);
+	int pl_stretch_factor = (pl->opts.may_stretch) ? MAX_STRETCH_FACTOR : 1;
 
 D	buf_shrink_cap(data, data->sz);
 D	buf_shrink_cap(tmp, tmp->sz);
 
-	int pl_stretch_factor = (pl->opts.may_stretch) ? MAX_STRETCH_FACTOR : 1;
-	buf_prepare_append(tmp, data->sz * pl_stretch_factor);
+	if (tmp == data) {
+		buf_prepare_capacity(tmp, data->sz*pl_stretch_factor);
+	} else {
+		buf_clear(tmp);
+		buf_prepare_append(tmp, data->res + data->sz*pl_stretch_factor);
+		buf_set_reserved(tmp, data->res);
+	}
 
 	const char *const readstart = data->p;
 	const char       *readp     = data->p;
@@ -224,15 +225,7 @@ D		assert(buf_boundscheck_write(tmp, writep, 0));
 
 D		assert(buf_boundscheck_read(data, rest, rest_sz)&BUF_RIGHTEDGE);
 
-		// should never ever happen, but: if the unread data is at the
-		//  beginning of the buffer && it's not the output buffer, then
-		//  we can just buf_swap() it into the plugin's temp. buffer
-		if U (data != tmp && rest == data->p && rest_sz == data->sz) {
-			assert(pl->buf.sz == 0); // this was cleared before
-			buf_swap(&pl->buf, data);
-		} else {
-			buf_append(&pl->buf, rest, rest_sz);
-		}
+		buf_append(&pl->buf, rest, rest_sz);
 
 		plugin_check_tmpbuf(pl, fmt);
 	}
