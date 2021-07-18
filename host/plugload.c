@@ -22,15 +22,19 @@ apply_defaults(const char *path, struct plugin_options *out)
 	}
 
 	else if (strcmp(dllname, "dsp_freeverb.dll") == 0) {
+		// doesn't actually seem to matter
+		out->process_max_frames = 2048;
 		out->may_stretch = false;
-		// 24 = static. i wonder if the others just happen to work
-		//  because they're multiples of 8
+		// 24 = static. probably only really works with 16
 		out->bits = strdup("8,16,32");
 	}
 
 	else if (strcmp(dllname, "dsp_pacemaker.dll") == 0) {
-		// 576*3 may be buggy
-		out->process_max_frames = 576*2;
+		// 576*2 = safe
+		// 576*3 = might've been buggy or it might've been something else
+		// 2048+32 = crashes on stretching
+		// testing 2048 since it seems to w0rk
+		out->process_max_frames = 2048;
 		out->doconf = 0;
 		// 8 = distorts when stretching
 		out->bits = strdup("16,24,32");
