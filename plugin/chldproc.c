@@ -13,8 +13,9 @@
 
 // -----------------------------------------------------------------------------
 
-static const char mark1[8] = "password";
-static const char mark2[8] = "zanzibar";
+// source: https://www.random.org/bytes/
+static const char mark1[8] = {0x8f, 0xad, 0xb2, 0xe9, 0xcd, 0x17, 0xec, 0xda};
+static const char mark2[8] = {0x1c, 0xd3, 0x96, 0xe0, 0x0c, 0xd2, 0x42, 0xac};
 
 #define MIN(a, b) ((a < b) ? (a) : (b))
 
