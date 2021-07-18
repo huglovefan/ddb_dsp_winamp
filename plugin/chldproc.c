@@ -39,6 +39,10 @@ pcm_convert_s(const ddb_waveformat_t *const infmt,
 	size_t mark2sz;
 	char *mark2pos = NULL;
 
+	assert(outfmt != infmt); // detect misuse
+	fmt_assert_reasonable(infmt);
+	fmt_assert_reasonable(outfmt);
+
 	assert(outbufcap >= outbufreq);
 
 	// nothing to convert?

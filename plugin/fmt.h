@@ -12,3 +12,6 @@ fmt_frames2bytes(const ddb_waveformat_t *fmt, int frames);
 
 size_t
 fmt_bytes2frames(const ddb_waveformat_t *fmt, int frames);
+
+void
+fmt_assert_reasonable(const ddb_waveformat_t *fmt);
