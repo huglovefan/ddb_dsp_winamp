@@ -45,8 +45,23 @@ pcm_convert_s(const ddb_waveformat_t *const infmt,
 	if (in_frames == 0)
 		return;
 
-	// already the same format?
-	if (memcmp(outfmt, infmt, sizeof(ddb_waveformat_t)) == 0) {
+	// member           can be converted
+	//  bps              yes
+	//  is_float         yes
+	//  channels         yes
+	//  channelmask      yes
+	//  samplerate       no
+	//  is_bigendian     no
+
+	// these can't be converted here
+	assert(outfmt->samplerate == infmt->samplerate);
+	assert(outfmt->is_bigendian == infmt->is_bigendian);
+
+	// are all other members the same already?
+	if (outfmt->bps == infmt->bps &&
+	    outfmt->is_float == infmt->is_float &&
+	    outfmt->channels == infmt->channels &&
+	    outfmt->channelmask == infmt->channelmask) {
 		if (outbuf != inbuf)
 			memcpy(outbuf, inbuf, inbufsz);
 
