@@ -98,6 +98,8 @@ process_thread_main(void *ud)
 			if (plugins[i].skip)
 				continue;
 
+			assert(data.res >= plugins[i].buf.sz);
+
 			oldtmpsz = plugins[i].buf.sz;
 			oldres = data.res;
 
@@ -106,12 +108,12 @@ process_thread_main(void *ud)
 
 			resused = oldres-data.res;
 
-			// plugin used either 0 reserved space OR the exact old
-			//  size of its tmp buffer
-D			assert(resused == 0 || resused == oldtmpsz);
-
 			if (data.sz == 0)
 				break;
+
+			// plugin used either 0 reserved space OR the exact old
+			//  size of its tmp buffer
+			assert(resused == 0 || resused == oldtmpsz);
 		}
 		procidx = -1;
 

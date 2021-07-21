@@ -39,22 +39,21 @@ plugin_check_tmpbuf(struct plugin *pl, struct fmt *fmt);
 static void
 plugin_process_twobuf(struct plugin *pl, struct fmt *fmt, struct buf *data, struct buf *tmp);
 
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeclaration-after-statement"
-
 void
 plugin_process(struct plugin *pl,
                struct fmt *fmt,
                struct buf *data,
                struct buf *tmp)
 {
+	const int avail = fmt_bytes2frames(fmt, pl->buf.sz+data->sz);
+	int edible = edible_size(pl, avail);
+	size_t oldres = data->res;
+	bool use_onebuf;
+
 	if U (pl->opts.randomize) plugin_randomize_opts(pl);
 
 D	buf_shrink_cap(data, data->sz);
 D	buf_free(tmp);
-
-	const int avail = fmt_bytes2frames(fmt, pl->buf.sz+data->sz);
-	int edible = edible_size(pl, avail);
 
 	//
 	// if there's not enough data to process it, save it to this plugin's
@@ -78,7 +77,7 @@ D	buf_free(tmp);
 		}
 		plugin_check_tmpbuf(pl, fmt);
 D		buf_free(data);
-		return;
+		goto out;
 	}
 
 	// add old saved data to the input buffer
@@ -91,6 +90,7 @@ D		buf_free(data);
 
 		buf_prepend_buf(data, &pl->buf);
 		buf_clear(&pl->buf);
+		oldres = data->res; // re-set since we used some
 	}
 
 	/// warning: obsolete historical comment
@@ -111,7 +111,7 @@ D		buf_free(data);
 	///  been modified to deal with the two buffers being the same
 	/// it still has the advantage of reduced copying when it's not necessary
 
-	bool use_onebuf = false;
+	use_onebuf = false;
 	if (edible == avail) // can process all of it in one call
 		use_onebuf = true;
 	else if (!pl->opts.may_stretch) // plugin known not to stretch sound
@@ -127,9 +127,11 @@ D		buf_free(data);
 		tmp = data;
 
 	plugin_process_twobuf(pl, fmt, data, tmp);
+out:
+	// unless size is 0 (next plugin won't be called), check that we didn't
+	//  accidentally erase the reserved space
+	assert(data->sz == 0 || data->res >= oldres);
 }
-
-#pragma GCC diagnostic pop
 
 static void
 ModifySamples_s(struct plugin *pl,
