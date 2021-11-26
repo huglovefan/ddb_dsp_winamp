@@ -31,10 +31,10 @@ apply_defaults(const char *path, struct plugin_options *out)
 
 	else if (strcmp(dllname, "dsp_pacemaker.dll") == 0) {
 		// 576*2 = safe
-		// 576*3 = might've been buggy or it might've been something else
-		// 2048+32 = crashes on stretching
-		// testing 2048 since it seems to w0rk
-		out->process_max_frames = 2048;
+		// 576*3 = freezes when starting a 48000Hz file as the first thing (set speed to +20%)
+		// 2048+32 = crashes when stretching
+		// this also works: [pmf=128 pfm=128 pMf=2048] but too-high minimum might be bad
+		out->process_max_frames = 576*2;
 		out->doconf = 0;
 		// 8 = distorts when stretching
 		out->bits = strdup("16,24,32");
