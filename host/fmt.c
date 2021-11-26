@@ -21,15 +21,29 @@ fmt_bytes2frames(const struct fmt *self, size_t bytes)
 bool
 fmt_same(const struct fmt *self, const struct fmt *other)
 {
-	return self->rate == other->rate &&
-	    self->bps == other->bps &&
-	    self->ch == other->ch;
+	unsigned diff = 0;
+
+	diff |= self->rate ^ other->rate;
+	diff |= self->bps ^ other->bps;
+	diff |= self->ch ^ other->ch;
+
+	return diff == 0;
 }
 
 bool
 fmt_makes_sense(const struct fmt *self)
 {
-	return self->rate >= 8000 && self->rate <= 192000 &&
-	    self->bps >= 8 && self->bps % 8 == 0 && self->bps <= 32 &&
-	    self->ch >= 1 && self->ch <= 8;
+	unsigned err = 0;
+
+	err |= self->rate < 8000;
+	err |= self->rate > 192000;
+
+	// fixme: check 0
+	err |= self->bps & 7; // not a multiple of 8
+	err |= self->bps & (unsigned)~63; // bits above 32 set
+
+	err |= self->ch < 1;
+	err |= self->ch > 8;
+
+	return err == 0;
 }

@@ -1,8 +1,12 @@
 CC := i686-w64-mingw32-gcc -m32
 CPPFLAGS := -MMD -MP -I../Winamp\ SDK
-CFLAGS := -O2 -g -fstack-protector-strong
+CFLAGS := -O2 -g -fstack-protector-strong -mtune=native
 LDFLAGS := -Wl,--stack,$$((16*1024*1024))
 LDLIBS := -lntdll -lssp
+
+CFLAGS += -std=gnu11
+CPPFLAGS += -pthread
+LDFLAGS += -pthread
 
 ifneq (,$(D))
  CPPFLAGS += -DD
@@ -18,6 +22,7 @@ endif
 CFLAGS += \
 	-Wall \
 	-Wextra \
+	-Wconversion \
 	-Wdeclaration-after-statement \
 	-Wmissing-prototypes \
 	-Wno-misleading-indentation \

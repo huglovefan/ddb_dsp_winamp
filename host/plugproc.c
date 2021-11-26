@@ -1,5 +1,6 @@
 #include "plugin.h"
 
+#include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 
@@ -7,16 +8,72 @@
 #include "macros.h"
 #include "misc.h"
 
+struct plugin *_Atomic procplug = NULL;
+
 #define MAX_STRETCH_FACTOR 2
 
-static int
-edible_size(struct plugin *pl, int frames_avail)
-{
-	int frames_avail_orig = frames_avail;
+static unsigned
+edible_size(struct plugin *pl, unsigned frames_avail);
 
-	int pMf = pl->opts.process_max_frames;
-	int pfm = pl->opts.process_frames_mult;
-	int pmf = pl->opts.process_min_frames;
+static void
+plugin_check_tmpbuf(struct plugin *pl, const struct fmt *fmt);
+
+static void
+plugin_process_twobuf(struct plugin *pl, const struct fmt *fmt, struct buf *data, struct buf *tmp);
+
+static void
+plugin_process(struct plugin *pl,
+               const struct fmt *fmt,
+               struct buf *data,
+               struct buf *tmp);
+
+void
+plugin_process_all(const struct fmt *fmt, struct buf *data, struct buf *tmp)
+{
+	// check that there's enough reserved space for all the plugins
+	D {
+		size_t needres = 0;
+		for (unsigned int i = 0; i < plugins_cnt; i++) {
+			if (!plugins[i].skip)
+				needres += plugins[i].buf.sz;
+		}
+		assert(data->res >= needres);
+	}
+
+	for (unsigned int i = 0; i < plugins_cnt; i++) {
+		size_t oldtmpsz, oldres, resused;
+
+		if (plugins[i].skip)
+			continue;
+
+		assert(data->res >= plugins[i].buf.sz);
+
+		oldtmpsz = plugins[i].buf.sz;
+		oldres = data->res;
+
+		plugin_process(&plugins[i], fmt, data, tmp);
+
+		resused = oldres-data->res;
+
+		if (data->sz == 0)
+			break;
+
+		// plugin used either 0 reserved space OR the exact old size of
+		//  its tmp buffer
+D		assert(resused == 0 || resused == oldtmpsz);
+	}
+}
+
+// -----------------------------------------------------------------------------
+
+static unsigned
+edible_size(struct plugin *pl, unsigned frames_avail)
+{
+	unsigned frames_avail_orig = frames_avail;
+
+	unsigned pMf = pl->opts.process_max_frames;
+	unsigned pfm = pl->opts.process_frames_mult;
+	unsigned pmf = pl->opts.process_min_frames;
 
 	if (pMf != 0 && frames_avail > pMf)
 		frames_avail = pMf;
@@ -27,33 +84,21 @@ edible_size(struct plugin *pl, int frames_avail)
 	if (frames_avail < pmf)
 		frames_avail = 0;
 
-D	assert(frames_avail >= 0);
 D	assert(frames_avail <= frames_avail_orig);
 
 	return frames_avail;
 }
 
 static void
-plugin_check_tmpbuf(struct plugin *pl, struct fmt *fmt);
-
-static void
-plugin_process_twobuf(struct plugin *pl, struct fmt *fmt, struct buf *data, struct buf *tmp);
-
-void
 plugin_process(struct plugin *pl,
-               struct fmt *fmt,
+               const struct fmt *fmt,
                struct buf *data,
                struct buf *tmp)
 {
-	const int avail = fmt_bytes2frames(fmt, pl->buf.sz+data->sz);
-	int edible = edible_size(pl, avail);
+	const unsigned avail = fmt_bytes2frames(fmt, pl->buf.sz+data->sz);
+	unsigned edible = edible_size(pl, avail);
 	size_t oldres = data->res;
 	bool use_onebuf;
-
-	if U (pl->opts.randomize) plugin_randomize_opts(pl);
-
-D	buf_shrink_cap(data, data->sz);
-D	buf_free(tmp);
 
 	//
 	// if there's not enough data to process it, save it to this plugin's
@@ -75,8 +120,7 @@ D	buf_free(tmp);
 			buf_append_buf(&pl->buf, data);
 			buf_clear(data);
 		}
-		plugin_check_tmpbuf(pl, fmt);
-D		buf_free(data);
+D		plugin_check_tmpbuf(pl, fmt);
 		goto out;
 	}
 
@@ -117,12 +161,6 @@ D		buf_free(data);
 	else if (!pl->opts.may_stretch) // plugin known not to stretch sound
 		use_onebuf = true;
 
-	// (randomize) if either version would work, then pick one at random
-	if U (use_onebuf && pl->opts.randomize) {
-		if (rand() % 100 >= 60)
-			use_onebuf = false;
-	}
-
 	if (use_onebuf)
 		tmp = data;
 
@@ -135,26 +173,23 @@ out:
 
 static void
 ModifySamples_s(struct plugin *pl,
-                struct fmt *fmt,
+                const struct fmt *fmt,
                 const char *inbuf,
-                int *inbuf_frames,
+                unsigned *inbuf_frames,
                 char *outbuf,
-                int *outbuf_frames);
+                unsigned *outbuf_frames);
 
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wdeclaration-after-statement"
 
 static void
 plugin_process_twobuf(struct plugin *pl,
-                      struct fmt *fmt,
+                      const struct fmt *fmt,
                       struct buf *data,
                       struct buf *tmp)
 {
 	const size_t fs = fmt_frame_size(fmt);
-	int pl_stretch_factor = (pl->opts.may_stretch) ? MAX_STRETCH_FACTOR : 1;
-
-D	buf_shrink_cap(data, data->sz);
-D	buf_shrink_cap(tmp, tmp->sz);
+	unsigned pl_stretch_factor = (pl->opts.may_stretch) ? MAX_STRETCH_FACTOR : 1;
 
 	if (tmp == data) {
 		buf_prepare_capacity(tmp, data->sz*pl_stretch_factor);
@@ -172,11 +207,9 @@ D	buf_shrink_cap(tmp, tmp->sz);
 	char             *writep     = tmp->p;
 	const char *const writeend   = tmp->p + tmp->cap;
 
-	// xxx: how to check if samples are overwritten by a stretch?
-
 	while (readp < readend && writep < writeend) {
-		int readable = (readend-readp)/fs;
-		int writable = (writeend-writep)/fs;
+		unsigned readable = (size_t)(readend-readp)/fs;
+		unsigned writable = (size_t)(writeend-writep)/fs;
 
 		// sanity
 D		assert(buf_boundscheck_read(data, readp, fs*readable));
@@ -218,7 +251,7 @@ D		assert(buf_boundscheck_write(tmp, writep, 0));
 	//
 	if (readp < readend) {
 		const char *rest = readp;
-		size_t rest_sz = readend-rest;
+		size_t rest_sz = (size_t)(readend-rest);
 
 		if U (pl->opts.trace)
 			fprintf(stderr, "[%s] leftover frames after processing: %d\n",
@@ -229,10 +262,10 @@ D		assert(buf_boundscheck_read(data, rest, rest_sz)&BUF_RIGHTEDGE);
 
 		buf_append(&pl->buf, rest, rest_sz);
 
-		plugin_check_tmpbuf(pl, fmt);
+D		plugin_check_tmpbuf(pl, fmt);
 	}
 
-	buf_set_size(tmp, writep-writestart);
+	buf_set_size(tmp, (size_t)(writep-writestart));
 	buf_swap(data, tmp);
 }
 
@@ -241,14 +274,14 @@ D		assert(buf_boundscheck_read(data, rest, rest_sz)&BUF_RIGHTEDGE);
 // the s stands for silly
 static void
 ModifySamples_s(struct plugin *pl,
-                struct fmt *fmt,
+                const struct fmt *fmt,
                 const char *inbuf,
-                int *inbuf_frames,
+                unsigned *inbuf_frames,
                 char *outbuf,
-                int *outbuf_frames)
+                unsigned *outbuf_frames)
 {
 	const size_t fs = fmt_frame_size(fmt);
-	int pl_stretch_factor = (pl->opts.may_stretch) ? MAX_STRETCH_FACTOR : 1;
+	unsigned pl_stretch_factor = (pl->opts.may_stretch) ? MAX_STRETCH_FACTOR : 1;
 	int plug_rv;
 
 	*inbuf_frames = edible_size(pl, *inbuf_frames);
@@ -276,12 +309,14 @@ ModifySamples_s(struct plugin *pl,
 		    superbasename(pl->opts.path),
 		    *inbuf_frames);
 
+	procplug = pl;
 	plug_rv = pl->module->ModifySamples(pl->module,
 	    (short int *)outbuf,
-	    *inbuf_frames,
-	    fmt->bps,
-	    fmt->ch,
-	    fmt->rate);
+	    (int)*inbuf_frames,
+	    (int)fmt->bps,
+	    (int)fmt->ch,
+	    (int)fmt->rate);
+	procplug = NULL;
 
 	if U (pl->opts.trace)
 		fprintf(stderr, " -> %d\n",
@@ -294,7 +329,7 @@ ModifySamples_s(struct plugin *pl,
 		plug_rv = 0;
 	}
 
-	if U (plug_rv > *inbuf_frames*pl_stretch_factor) {
+	if U ((unsigned)plug_rv > *inbuf_frames*pl_stretch_factor) {
 		fprintf(stderr, "warning: %.1fx stretch (%d -> %d) by plugin %s is above %s %d\n",
 		    (float)plug_rv / (float)*inbuf_frames,
 		    *inbuf_frames, plug_rv,
@@ -305,9 +340,9 @@ ModifySamples_s(struct plugin *pl,
 		    pl_stretch_factor);
 	}
 
-	assert(plug_rv <= *outbuf_frames);
+	assert((unsigned)plug_rv <= *outbuf_frames);
 
-	*outbuf_frames = plug_rv;
+	*outbuf_frames = (unsigned)plug_rv;
 
 	return;
 }
@@ -317,7 +352,7 @@ ModifySamples_s(struct plugin *pl,
 //
 static void
 plugin_check_tmpbuf(struct plugin *pl,
-                    struct fmt *fmt)
+                    const struct fmt *fmt)
 {
 	size_t fs = fmt_frame_size(fmt);
 	size_t onesec = fs*fmt->rate;

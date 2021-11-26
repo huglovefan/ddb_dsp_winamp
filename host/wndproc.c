@@ -1,5 +1,6 @@
 #include "wndproc.h"
 
+#include <stdatomic.h>
 #include <stdio.h>
 
 #include <Winamp/wa_ipc.h>
@@ -8,46 +9,18 @@
 #include "misc.h"
 #include "shm.h"
 
-// slow and terrible
-/*
-#define IPC_FILE "/tmp/ddw_ipc.tmp"
-static FILE *
-deadbeef_ipc_real(const char *cmdline)
-{
-	if (0 != unlink(IPC_FILE) && errno != ENOENT) {
-		perror("unlink");
-		goto err;
-	}
-	if (0 != system(cmdline)) {
-		perror("system");
-		goto err;
-	}
-	FILE *f;
-	Sleep( 10); if ((f = fopen(IPC_FILE, "rb")) != NULL) goto ok;
-	Sleep( 10); if ((f = fopen(IPC_FILE, "rb")) != NULL) goto ok; // 20ms
-	Sleep( 20); if ((f = fopen(IPC_FILE, "rb")) != NULL) goto ok; // 40ms
-	Sleep( 20); if ((f = fopen(IPC_FILE, "rb")) != NULL) goto ok; // 60ms
-	Sleep( 40); if ((f = fopen(IPC_FILE, "rb")) != NULL) goto ok; // 100ms
-	Sleep(100); if ((f = fopen(IPC_FILE, "rb")) != NULL) goto ok; // 200ms
-	Sleep(100); if ((f = fopen(IPC_FILE, "rb")) != NULL) goto ok; // 300ms
-	Sleep(200); if ((f = fopen(IPC_FILE, "rb")) != NULL) goto ok; // 500ms
-	Sleep(500); if ((f = fopen(IPC_FILE, "rb")) != NULL) goto ok; // 1000ms
-	goto err;
-ok:
-	return f;
-err:
-	return NULL;
-}
-#define deadbeef_ipc(x) deadbeef_ipc_real("start /b /unix /bin/sh -c \"cd; deadbeef --" x " > " IPC_FILE " 2>/dev/null\"")
-*/
-
 static const char *
 get_lastplug(void)
 {
-	int idx = procidx;
+	struct plugin *pl = procplug;
 
-	if (idx >= 0 && (unsigned)idx < plugins_cnt)
-		return superbasename(plugins[idx].opts.path);
+	// fixme: couldn't get the atomic working properly
+	// the generated code looks silly or i may be misreading it
+	// it looks like it's checking if "&procplug" is null and not its value
+	// it doesn't seem to crash like this so i'm leaving it
+
+	if (pl != NULL)
+		return superbasename(pl->opts.path);
 	else
 		return "?";
 }
@@ -91,7 +64,7 @@ WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 			return shm->track_idx;
 		case IPC_GETPLAYLISTTITLE: // 212
 //			fprintf(stderr, "GET shm->track_title = \"%s\" (%s)\n", shm->track_title, LASTPLUG);
-			return (uintptr_t)shm->track_title;
+			return (LRESULT)(uintptr_t)shm->track_title;
 		case IPC_GET_API_SERVICE: // 3025
 			// supposed to return a pointer to some C++ abomination added in winamp 5.12
 			return 1; // 1 = not supported

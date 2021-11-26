@@ -17,7 +17,7 @@ shmnew(const char *path, size_t sz)
 {
 	HANDLE File = INVALID_HANDLE_VALUE;
 	HANDLE Mapping = NULL;
-	LONG MapError;
+	DWORD MapError;
 	LPVOID View = NULL;
 	NTSTATUS DEPEnableStatus;
 

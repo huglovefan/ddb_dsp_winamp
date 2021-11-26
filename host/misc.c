@@ -16,7 +16,7 @@ assert_fail(const char *fmt, const char *arg1, const char *arg2)
 			rv = sizeof(deathmsg)-1;
 			deathmsg[sizeof(deathmsg)-1] = '\0';
 		}
-		write_full(2, deathmsg, rv);
+		write_full(2, deathmsg, (size_t)rv);
 	}
 	abort();
 }
@@ -107,7 +107,7 @@ again:
 }
 
 LPCSTR
-StrError(LONG Code)
+StrError(DWORD Code)
 {
 	DWORD Length;
 	static _Thread_local CHAR Buf[128];

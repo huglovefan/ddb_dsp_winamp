@@ -16,4 +16,3 @@ extern struct shmdata *shm;
 #define MAX_PLUGINS 16
 extern struct plugin plugins[MAX_PLUGINS];
 extern unsigned int plugins_cnt;
-extern _Atomic int procidx;

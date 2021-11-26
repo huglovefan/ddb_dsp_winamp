@@ -62,23 +62,27 @@ parse_plugin_options(const char *arg, struct plugin_options *out)
 
 	const struct option {
 		const char *name;
-		char type;
+		enum {
+			OPT_UINT,
+			OPT_BOOL,
+			OPT_STR,
+		} type;
 		union {
 			int *i;
+			unsigned *u;
 			char **s;
 		} v;
 	} options[] = {
-		{"pmf", 'u', {.i=&out->process_min_frames}},
-		{"pMf", 'u', {.i=&out->process_max_frames}},
-		{"pfm", 'u', {.i=&out->process_frames_mult}},
-		{"stretch", 'b', {.i=&out->may_stretch}},
-		{"conf", 'b', {.i=&out->doconf}},
-		{"randomize", 'b', {.i=&out->randomize}},
-		{"required", 'b', {.i=&out->required}},
-		{"trace", 'b', {.i=&out->trace}},
-		{"rate", 's', {.s=&out->rate}},
-		{"bits", 's', {.s=&out->bits}},
-		{"ch", 's', {.s=&out->ch}},
+		{"pmf", OPT_UINT, {.u=&out->process_min_frames}},
+		{"pMf", OPT_UINT, {.u=&out->process_max_frames}},
+		{"pfm", OPT_UINT, {.u=&out->process_frames_mult}},
+		{"stretch", OPT_BOOL, {.i=&out->may_stretch}},
+		{"conf", OPT_BOOL, {.i=&out->doconf}},
+		{"required", OPT_BOOL, {.i=&out->required}},
+		{"trace", OPT_BOOL, {.i=&out->trace}},
+		{"rate", OPT_STR, {.s=&out->rate}},
+		{"bits", OPT_STR, {.s=&out->bits}},
+		{"ch", OPT_STR, {.s=&out->ch}},
 		{NULL, 0, {NULL}},
 	};
 
@@ -106,7 +110,6 @@ parse_plugin_options(const char *arg, struct plugin_options *out)
 		.process_frames_mult = 32,
 		.may_stretch = 1,
 		.doconf = 1,
-		.randomize = 0,
 	};
 
 	do {
@@ -134,20 +137,21 @@ parse_plugin_options(const char *arg, struct plugin_options *out)
 		else value = NULL;
 
 		for (const struct option *opt = options; opt->name != NULL; opt++) {
+			unsigned int prefixlen = 0;
 			if (strcmp(name, opt->name) == 0)
 				goto match;
-			if (opt->type == 'b' &&
-			    (value == NULL || strcmp(value, "1") == 0) &&
-			    strncmp(name, "no", 2) == 0 &&
-			    strcmp(name+2, opt->name) == 0) {
-				name = name+2;
-				value = "0";
+			// accept prefixes for boolean option names
+			// "do": ignore, "no"/"not": negate the value
+			if (opt->type == OPT_BOOL &&
+			    ((strncmp(name, "do", prefixlen=2) == 0 && strcmp(name+prefixlen, opt->name) == 0) ||
+			     (strncmp(name, "no", prefixlen=2) == 0 && strcmp(name+prefixlen, opt->name) == 0) ||
+			     (strncmp(name, "not", prefixlen=3) == 0 && strcmp(name+prefixlen, opt->name) == 0))) {
 				goto match;
 			}
 			continue;
 match:
 			switch (opt->type) {
-			case 'u':
+			case OPT_UINT:
 				if (value == NULL) {
 					fprintf(stderr, "missing value for option \"%s\"\n", name);
 					goto err;
@@ -157,11 +161,12 @@ match:
 					goto err;
 				}
 				break;
-			case 'b':
-				value = value ?: "1";
-				*opt->v.i = atoi(value);
+			case OPT_BOOL:
+				*opt->v.i = (value != NULL) ? !!atoi(value) : 1;
+				if (prefixlen != 0 && *name == 'n') // negated
+					*opt->v.i = !*opt->v.i;
 				break;
-			case 's':
+			case OPT_STR:
 				free(*opt->v.s);
 				*opt->v.s = strdup(value);
 				break;
@@ -299,67 +304,6 @@ err:
 	return false;
 }
 
-void
-plugin_randomize_opts(struct plugin *pl)
-{
-	if L (pl->random_cnt > 0) {
-		pl->random_cnt--;
-		return;
-	}
-
-	if (rand() % 100 >= 96) {
-		// make plugin_process() add the data to the buffer without
-		//  processing it
-		// warning: three of these in a row and we'll be restarted for
-		//  misbehaving
-		pl->opts.process_frames_mult = 1;
-		pl->opts.process_min_frames = 99999;
-		pl->opts.process_max_frames = 99999;
-		pl->random_cnt = 0; // 0 = this call only
-		goto print;
-	}
-
-	switch (rand() % 4) {
-	case 0: pl->opts.process_frames_mult = 1; break;
-	case 1: pl->opts.process_frames_mult = 1; break;
-	case 2: pl->opts.process_frames_mult = 8; break;
-	case 3: pl->opts.process_frames_mult = 26; break;
-	}
-
-	switch (rand() % 4) {
-	case 0: pl->opts.process_min_frames = 1; break;
-	case 1: pl->opts.process_min_frames = 64; break;
-	case 2: pl->opts.process_min_frames = 151; break;
-	case 3: pl->opts.process_min_frames = 1567; break;
-	}
-
-	switch (rand() % 4) {
-	case 0: pl->opts.process_max_frames = 201; break;
-	case 1: pl->opts.process_max_frames = 4096; break;
-	case 2: pl->opts.process_max_frames = 512; break;
-	case 3: pl->opts.process_max_frames = 200; break;
-	}
-
-#define NEXTMULT(a, b) ( (a - (a % b)) + b )
-#define MULTUP(a, b) if (a % b != 0) a = NEXTMULT(a, b)
-
-	MULTUP(pl->opts.process_min_frames, pl->opts.process_frames_mult);
-	MULTUP(pl->opts.process_max_frames, pl->opts.process_frames_mult);
-
-	if (pl->opts.process_max_frames < pl->opts.process_min_frames)
-		pl->opts.process_max_frames = pl->opts.process_min_frames;
-
-#undef NEXTMULT
-#undef MULTUP
-
-	pl->random_cnt = rand() % 4;
-print:
-	fprintf(stderr, "pfm=%d pmf=%d pMf=%d\n",
-	    pl->opts.process_frames_mult,
-	    pl->opts.process_min_frames,
-	    pl->opts.process_max_frames);
-}
-
 static bool
 match_string(const char *spec, const char *value)
 {
@@ -385,7 +329,7 @@ match_string(const char *spec, const char *value)
 }
 
 const char *
-plugin_supports_format(struct plugin *pl, struct fmt *fmt)
+plugin_supports_format(struct plugin *pl, const struct fmt *fmt)
 {
 	char ratestr[16];
 	char bitstr[16];

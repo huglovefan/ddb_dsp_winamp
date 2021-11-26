@@ -28,8 +28,7 @@ buf_prepare_capacity(struct buf *self, size_t req)
 		newcap *= 2;
 
 	newp = realloc(realp, newcap);
-	if U (newp == NULL)
-		assert(!"buf_prepare_append: realloc");
+	assert(newp != NULL);
 
 	self->p = newp+self->res;
 	self->cap = newcap-self->res;
@@ -89,8 +88,7 @@ buf_swap(struct buf *self, struct buf *other)
 void
 buf_append_buf(struct buf *self, struct buf *other)
 {
-	if (other->sz > 0)
-		buf_append(self, other->p, other->sz);
+	buf_append(self, other->p, other->sz);
 }
 
 void
@@ -121,7 +119,7 @@ buf_boundscheck_read(struct buf *self, const char *p, size_t sz)
 	if U (!(p >= self->p && p <= self->p+self->sz-!!sz))
 		goto out;
 
-	offset = p-self->p;
+	offset = (size_t)(p-self->p);
 
 	if U (offset+sz > self->sz)
 		goto out;
@@ -156,7 +154,7 @@ buf_boundscheck_write(struct buf *self, const char *p, size_t sz)
 	if U (!(p >= self->p && p <= self->p+self->cap-!!sz))
 		goto out;
 
-	offset = p-self->p;
+	offset = (size_t)(p-self->p);
 
 	if U (offset+sz > self->cap)
 		goto out;

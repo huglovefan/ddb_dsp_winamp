@@ -20,12 +20,11 @@ struct plugin {
 
 #define MODULE_IDX_DEFAULT -1
 		int module_idx;
-		int process_min_frames;
-		int process_max_frames;
-		int process_frames_mult;
+		unsigned process_min_frames;
+		unsigned process_max_frames;
+		unsigned process_frames_mult;
 		int may_stretch;
 		int doconf;
-		int randomize;
 		int required;
 		char *path;
 		char *rate;
@@ -50,16 +49,12 @@ parse_plugin_options(const char *arg, struct plugin_options *out);
 bool
 load_plugin(struct plugin *pl);
 
-void
-plugin_randomize_opts(struct plugin *pl);
-
 const char *
-plugin_supports_format(struct plugin *pl, struct fmt *fmt);
+plugin_supports_format(struct plugin *pl, const struct fmt *fmt);
 
 /// plugproc.c
 
+extern struct plugin *_Atomic procplug; // the one currently doing ModifySamples()
+
 void
-plugin_process(struct plugin *pl,
-               struct fmt *fmt,
-               struct buf *data,
-               struct buf *tmp);
+plugin_process_all(const struct fmt *fmt, struct buf *data, struct buf *tmp);

@@ -21,7 +21,6 @@ struct shmdata *shm = NULL;
 
 struct plugin plugins[MAX_PLUGINS];
 unsigned int plugins_cnt = 0;
-_Atomic int procidx = -1;
 
 HWND mainwin = NULL;
 DWORD main_tid;
@@ -79,7 +78,7 @@ mainloop(void)
 	}
 
 	if (msg.message == WM_QUIT)
-		status = msg.wParam;
+		status = (int)msg.wParam;
 
 	return status;
 }
@@ -151,7 +150,7 @@ D	fprintf(stderr, "ddw_host.exe: debug checks are enabled\n");
 
 	main_tid = GetCurrentThreadId();
 
-	srand(main_tid*time(NULL)^time(NULL));
+	srand(main_tid*(unsigned)time(NULL)^(unsigned)time(NULL));
 
 	PeekMessage(&(MSG){0}, NULL, 0, 0, PM_NOREMOVE);
 

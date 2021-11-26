@@ -26,7 +26,7 @@ bool
 write_full(int fd, const void *p_, size_t sz);
 
 LPCSTR
-StrError(LONG Code);
+StrError(DWORD Code);
 
 VOID
 PrintError(LPCSTR What);

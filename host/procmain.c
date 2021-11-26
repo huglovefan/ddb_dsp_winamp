@@ -8,20 +8,24 @@
 #include "main.h"
 #include "misc.h"
 
+__attribute__((cold))
+static bool
+fmtchange(const struct fmt *fmt);
+
 DWORD WINAPI
 process_thread_main(void *ud)
 {
 	struct buf data = {0};
 	struct buf tmp = {0};
-	struct fmt fmt = {0};
-	struct fmt oldfmt = {0};
-	size_t restotal;
+	struct fmt lastfmt = {0};
 	int thread_rv = 0;
 	(void)ud;
 
 	for (;;) {
 		struct processing_request req;
 		struct processing_response res;
+		struct fmt fmt = {0};
+		size_t restotal;
 
 		if U (!read_full(in_fd, &req, sizeof(req))) {
 			if U (errno != 0)
@@ -40,41 +44,11 @@ process_thread_main(void *ud)
 		assert(fmt_makes_sense(&fmt));
 		assert(req.buffer_size % fmt_frame_size(&fmt) == 0);
 
-		if U (!fmt_same(&fmt, &oldfmt)) {
-			bool warn = false;
-			const char *what;
+		if U (!fmt_same(&fmt, &lastfmt)) {
+			if U (!fmtchange(&fmt))
+				goto err;
 
-			fprintf(stderr, "format change: rate=%d bps=%d ch=%d\n",
-			    fmt.rate, fmt.bps, fmt.ch);
-
-			for (unsigned int i = 0; i < plugins_cnt; i++) {
-				if (plugins[i].buf.sz != 0) {
-					plugins[i].buf.sz = 0;
-					warn = true;
-				}
-
-				//
-				// re-check compatibility
-				//
-				plugins[i].skip = false;
-				what = plugin_supports_format(&plugins[i], &fmt);
-				if (what != NULL) {
-					if (plugins[i].opts.required) {
-						fprintf(stderr, "error: required plugin %s doesn't support this %s, exiting\n",
-						    superbasename(plugins[i].opts.path),
-						    what);
-						goto err;
-					}
-					fprintf(stderr, "warning: disabling %s due to unsupported %s\n",
-					    superbasename(plugins[i].opts.path),
-					    what);
-					plugins[i].skip = true;
-				}
-			}
-			if (warn)
-				fprintf(stderr, "warning: threw out buffered data due to format change\n");
-
-			oldfmt = fmt;
+			lastfmt = fmt;
 		}
 
 		restotal = 0;
@@ -84,38 +58,15 @@ process_thread_main(void *ud)
 		}
 
 		buf_clear(&data);
-		buf_prepare_append(&data, restotal+req.buffer_size);
+		buf_prepare_append(&data, restotal+(size_t)req.buffer_size);
 		buf_set_reserved(&data, restotal);
 
-		if U (!read_full(in_fd, data.p, req.buffer_size))
+		if U (!read_full(in_fd, data.p, (size_t)req.buffer_size))
 			goto readerr;
 
-		buf_register_append(&data, req.buffer_size);
+		buf_register_append(&data, (size_t)req.buffer_size);
 
-		for (unsigned int i = 0; i < plugins_cnt; i++) {
-			size_t oldtmpsz, oldres, resused;
-
-			if (plugins[i].skip)
-				continue;
-
-			assert(data.res >= plugins[i].buf.sz);
-
-			oldtmpsz = plugins[i].buf.sz;
-			oldres = data.res;
-
-			procidx = i;
-			plugin_process(&plugins[i], &fmt, &data, &tmp);
-
-			resused = oldres-data.res;
-
-			if (data.sz == 0)
-				break;
-
-			// plugin used either 0 reserved space OR the exact old
-			//  size of its tmp buffer
-			assert(resused == 0 || resused == oldtmpsz);
-		}
-		procidx = -1;
+		plugin_process_all(&fmt, &data, &tmp);
 
 		res = (struct processing_response){
 			.buffer_size = data.sz,
@@ -134,7 +85,7 @@ out:
 	buf_free(&data);
 	buf_free(&tmp);
 	PostThreadMessage(main_tid, WM_QUIT,
-	    /* wParam */ thread_rv,
+	    /* wParam */ (unsigned int)thread_rv,
 	    /* lParam */ 0);
 	return 0;
 err:
@@ -153,3 +104,56 @@ readerr:
 		fprintf(stderr, "read: unexpected EOF\n");
 	goto err;
 }
+
+// -----------------------------------------------------------------------------
+
+#pragma GCC push_options
+#pragma GCC optimize "-Os"
+
+static bool
+compat_update(struct plugin *pl, const struct fmt *fmt);
+
+static bool
+fmtchange(const struct fmt *fmt)
+{
+	fprintf(stderr, "format change: rate=%d bps=%d ch=%d\n",
+	    fmt->rate, fmt->bps, fmt->ch);
+
+	for (unsigned int i = 0; i < plugins_cnt; i++) {
+		// discard cached data
+		if (plugins[i].buf.sz != 0)
+			buf_clear(&plugins[i].buf);
+
+		// re-check compatibility
+		if (!compat_update(&plugins[i], fmt))
+			return false;
+	}
+
+	return true;
+}
+
+static bool
+compat_update(struct plugin *pl, const struct fmt *fmt)
+{
+	const char *what;
+
+	what = plugin_supports_format(pl, fmt);
+	pl->skip = (what != NULL);
+
+	if (pl->skip) {
+		if (pl->opts.required) {
+			fprintf(stderr, "error: required plugin %s doesn't support this %s, exiting\n",
+			    superbasename(pl->opts.path),
+			    what);
+			return false;
+		}
+
+		fprintf(stderr, "warning: disabling %s due to unsupported %s\n",
+		    superbasename(pl->opts.path),
+		    what);
+	}
+
+	return true;
+}
+
+#pragma GCC pop_options
