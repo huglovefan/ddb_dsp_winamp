@@ -1,4 +1,4 @@
-module ddw.ddw;
+module ddw.pipedata;
 
 import core.stdc.stdint;
 

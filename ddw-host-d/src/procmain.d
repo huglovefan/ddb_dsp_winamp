@@ -7,8 +7,8 @@ import core.sys.windows.winbase;
 import core.sys.windows.windef;
 import core.sys.windows.winuser;
 
+import ddw.pipedata;
 import ddw.host.buf;
-import ddw.host.ddw;
 import ddw.host.fmt;
 import ddw.host.main;
 import ddw.host.misc;

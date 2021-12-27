@@ -8,9 +8,9 @@ import core.sys.posix.sys.uio;
 
 import std.algorithm : min;
 
+import ddw.pipedata;
 import ddw.child;
 import ddw.chldinit;
-import ddw.ddw;
 import ddw.fmt;
 import ddw.misc;
 import ddw.plugin;
