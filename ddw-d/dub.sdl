@@ -1,0 +1,4 @@
+name "ddw-d"
+targetType "dynamicLibrary"
+sourceFiles "src/zzz_deadbeef.c"
+sourcePaths "src" "../shared"
