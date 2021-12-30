@@ -19,6 +19,20 @@ import ddw.host.procmain;
 import ddw.host.shm;
 import ddw.host.wndproc;
 
+__gshared int in_fd = -1;
+__gshared int out_fd = -1;
+
+__gshared Shm* shm;
+
+__gshared Plugin[] plugins;
+
+__gshared HWND mainwin;
+__gshared DWORD main_tid;
+
+// -----------------------------------------------------------------------------
+
+private:
+
 enum STDIN_FILENO = 0;
 enum STDOUT_FILENO = 1;
 enum STDERR_FILENO = 2;
@@ -33,18 +47,6 @@ enum STACK_SIZE_PARAM_IS_A_RESERVATION = 0x00010000;
 
 // https://github.com/wine-mirror/wine/blob/80e2154/include/msvcrt/fcntl.h
 enum O_RDWR = 2;
-
-// -----------------------------------------------------------------------------
-
-__gshared int in_fd = -1;
-__gshared int out_fd = -1;
-
-__gshared Shm* shm;
-
-__gshared Plugin[] plugins;
-
-__gshared void* mainwin;
-__gshared uint main_tid;
 
 // -----------------------------------------------------------------------------
 
