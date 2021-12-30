@@ -16,9 +16,6 @@ import ddw.host.plugin;
 import ddw.host.plugload;
 import ddw.host.plugproc;
 
-nothrow:
-@nogc:
-
 extern (Windows) uint process_thread_main(void* ud)
 {
 	Buf data;

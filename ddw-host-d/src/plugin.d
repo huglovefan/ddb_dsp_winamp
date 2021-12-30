@@ -20,19 +20,23 @@ struct Plugin
 
 enum MODULE_IDX_DEFAULT = -1;
 
+// the default for process_max_frames is 576 to match the buffer size winamp uses
+// (something to do with mp3 decoding)
+
 struct PluginOpts
 {
-	int trace;
+	int trace = 0;
 
-	int module_idx;
-	uint process_min_frames;
-	uint process_max_frames;
-	uint process_frames_mult;
-	int may_stretch;
-	int doconf;
-	int required;
-	char* path;
-	char* rate;
-	char* bits;
-	char* ch;
+	int module_idx = MODULE_IDX_DEFAULT;
+	uint process_min_frames = 576;
+	uint process_max_frames = 576;
+	uint process_frames_mult = 576;
+	int may_stretch = 1;
+	int doconf = 1;
+	int required = 0;
+	char* path = null;
+
+	string rate;
+	string bits;
+	string ch;
 }

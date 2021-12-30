@@ -7,7 +7,7 @@ import core.sys.windows.winbase;
 import core.sys.windows.windef;
 
 import std.algorithm.iteration : splitter;
-import std.algorithm.searching : startsWith;
+import std.algorithm.searching : canFind, startsWith;
 import std.conv : ConvException, to;
 import std.stdio : writefln;
 import std.string : fromStringz, indexOf, toStringz;
@@ -34,26 +34,26 @@ void apply_defaults(string path, PluginOpts* outp)
 	{
 		case "dsp_centercut.dll":
 			outp.doconf = 0;
-			outp.bits = strdup("16,24,32"); // 8 = loud
+			outp.bits = "16,24,32"; // 8 = loud
 			break;
 
 		case "dsp_freeverb.dll":
 			outp.may_stretch = false;
-			outp.bits = strdup("8,16,32"); // 24 = static. probably only really works with 16
+			outp.bits = "8,16,32"; // 24 = static. probably only really works with 16
 			break;
 
 		case "dsp_pacemaker.dll":
 			outp.doconf = 0;
-			outp.bits = strdup("16,24,32"); // 8 = distorts when stretching
+			outp.bits = "16,24,32"; // 8 = distorts when stretching
 			break;
 
 		case "dsp_sps.dll":
-			outp.bits = strdup("16"); // only 16 works properly
+			outp.bits = "16"; // only 16 works properly
 			break;
 
 		case "dsp_stereo_tool.dll":
 			outp.may_stretch = false;
-			outp.bits = strdup("16,24,32"); // 8 = loud
+			outp.bits = "16,24,32"; // 8 = loud
 			outp.required = true;
 			break;
 
@@ -76,14 +76,14 @@ bool parse_plugin_options(string s, PluginOpts* outp)
 		{
 			OPT_UINT,
 			OPT_BOOL,
-			OPT_STR,
+			OPT_DSTR,
 		}
 		Type type;
 		union Value
 		{
 			int* i;
 			uint* u;
-			char** s;
+			string* D;
 		}
 		Value v;
 	}
@@ -95,22 +95,12 @@ bool parse_plugin_options(string s, PluginOpts* outp)
 		{"conf", Option.Type.OPT_BOOL, {i: &outp.doconf}},
 		{"required", Option.Type.OPT_BOOL, {i: &outp.required}},
 		{"trace", Option.Type.OPT_BOOL, {i: &outp.trace}},
-		{"rate", Option.Type.OPT_STR, {s: &outp.rate}},
-		{"bits", Option.Type.OPT_STR, {s: &outp.bits}},
-		{"ch", Option.Type.OPT_STR, {s: &outp.ch}},
+		{"rate", Option.Type.OPT_DSTR, {D: &outp.rate}},
+		{"bits", Option.Type.OPT_DSTR, {D: &outp.bits}},
+		{"ch", Option.Type.OPT_DSTR, {D: &outp.ch}},
 	];
 
-	// the default for process_max_frames is 576 to match the buffer size winamp uses
-	// (something to do with mp3 decoding)
-
 	*outp = PluginOpts.init;
-	outp.path = null;
-	outp.module_idx = MODULE_IDX_DEFAULT;
-	outp.process_min_frames = 576;
-	outp.process_max_frames = 576;
-	outp.process_frames_mult = 576;
-	outp.may_stretch = 1;
-	outp.doconf = 1;
 
 	foreach (part; s.splitter(':'))
 	{
@@ -194,8 +184,8 @@ match:
 				if (prefixlen != 0 && name[0] == 'n') // negated // <-- won't this bug out when the real name start with n?
 					*opt.v.i = !*opt.v.i;
 				break;
-			case Option.Type.OPT_STR:
-				*opt.v.s = cast(char*)value.toStringz;
+			case Option.Type.OPT_DSTR:
+				*opt.v.D = value;
 				break;
 			default:
 				assert(0, "option has invalid type");
@@ -241,8 +231,8 @@ match:
 				case Option.Type.OPT_BOOL:
 					writefln("  %s=%d", opt.name, *opt.v.i);
 					break;
-				case Option.Type.OPT_STR:
-					writefln("  %s=\"%s\"", opt.name, fromStringz(*opt.v.s));
+				case Option.Type.OPT_DSTR:
+					writefln("  %s=\"%s\"", opt.name, *opt.v.D);
 					break;
 				default:
 					assert(0, "option has invalid type");
@@ -310,9 +300,9 @@ unittest
 	assert(opts.doconf);
 	assert(opts.required);
 	assert(opts.trace);
-	assert(opts.rate.fromStringz == "8000,44100");
-	assert(opts.bits.fromStringz == "8,24");
-	assert(opts.ch.fromStringz == "1,2");
+	assert(opts.rate == "8000,44100");
+	assert(opts.bits == "8,24");
+	assert(opts.ch == "1,2");
 }
 
 /**
@@ -405,28 +395,9 @@ err:
 	return false;
 }
 
-bool match_string(const(char)* spec, const(char)* value) pure nothrow @nogc
+bool match_string(string spec, string value) pure
 {
-	const(char)* p = spec;
-	const(char)* end;
-	size_t vallen = strlen(value);
-	size_t ptlen;
-
-	for (;;)
-	{
-		end = strchrnul(cast(char*)p, ',');
-		ptlen = cast(size_t)(end-p);
-
-		if (ptlen == vallen && memcmp(p, value, vallen) == 0)
-			return true;
-
-		if (*end == '\0')
-			break;
-
-		p = end+1;
-	}
-
-	return false;
+	return spec.splitter(',').canFind(value);
 }
 
 /**
@@ -437,23 +408,23 @@ bool match_string(const(char)* spec, const(char)* value) pure nothrow @nogc
  * 
  * if the format is supported, returns null
  */
-const(char)* plugin_supports_format(const(Plugin)* pl, const(Fmt)* fmt) nothrow @nogc
+const(char)* plugin_supports_format(const(Plugin)* pl, const(Fmt)* fmt) pure
 {
-	char[16] ratestr;
-	char[16] bitstr;
-	char[16] chstr;
+	string ratestr;
+	string bitstr;
+	string chstr;
 
-	snprintf(ratestr.ptr, ratestr.length, "%d", fmt.rate);
-	snprintf(bitstr.ptr, bitstr.length, "%d", fmt.bps);
-	snprintf(chstr.ptr, chstr.length, "%d", fmt.ch);
+	ratestr = fmt.rate.to!string;
+	bitstr  = fmt.bps.to!string;
+	chstr   = fmt.ch.to!string;
 
-	if (pl.opts.rate != null && !match_string(pl.opts.rate, ratestr.ptr))
+	if (pl.opts.rate != null && !match_string(pl.opts.rate, ratestr))
 		return "sample rate";
 
-	if (pl.opts.bits != null && !match_string(pl.opts.bits, bitstr.ptr))
+	if (pl.opts.bits != null && !match_string(pl.opts.bits, bitstr))
 		return "bit depth";
 
-	if (pl.opts.ch != null && !match_string(pl.opts.ch, chstr.ptr))
+	if (pl.opts.ch != null && !match_string(pl.opts.ch, chstr))
 		return "channel count";
 
 	return null;
