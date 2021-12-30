@@ -215,16 +215,8 @@ extern (C) int _Dmain(string[] args)
 	}
 	for (int i = 1; i < args.length; i++)
 	{
-		version (D_BetterC)
-		{
-			if (!new_plugin(args[i].ptr, &plugins[i-1]))
-				goto err;
-		}
-		else
-		{
-			if (!new_plugin(args[i].toStringz, &plugins[i-1]))
-				goto err;
-		}
+		if (!new_plugin(args[i].toStringz, &plugins[i-1]))
+			goto err;
 	}
 	if (plugins.length == 0)
 	{
