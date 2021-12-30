@@ -13,6 +13,7 @@ import ddw.host.plugin;
 import ddw.host.winamp;
 
 debug = forceSafeBufferSizes;
+//debug = printParsedOptions;
 
 nothrow:
 @nogc:
@@ -207,6 +208,30 @@ next:
 		outp.process_max_frames = 576;
 		outp.process_frames_mult = 576;
 	}
+
+	debug (printParsedOptions)
+	{
+		printf("%s:\n", superbasename(outp.path));
+
+		foreach (ref opt; options)
+		{
+			switch (opt.type)
+			{
+				case Option.Type.OPT_UINT:
+					printf("  %s=%u\n", opt.name, *opt.v.u);
+					break;
+				case Option.Type.OPT_BOOL:
+					printf("  %s=%d\n", opt.name, *opt.v.i);
+					break;
+				case Option.Type.OPT_STR:
+					printf("  %s=\"%s\"\n", opt.name, *opt.v.s);
+					break;
+				default:
+					assert(0, "option has invalid type");
+			}
+		}
+	}
+
 
 	if (outp.process_min_frames % outp.process_frames_mult != 0)
 	{
