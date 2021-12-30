@@ -60,11 +60,11 @@ enum O_RDWR = 2;
 
 // -----------------------------------------------------------------------------
 
-bool new_plugin(const(char)* arg, Plugin* pl)
+bool new_plugin(string arg, Plugin* pl)
 {
 	if (!parse_plugin_options(arg, &pl.opts))
 	{
-		fprintf(stderr, "error: option parsing failed for argument \"%s\"\n", arg);
+		fprintf(stderr, "error: option parsing failed for argument \"%s\"\n", arg.toStringz);
 		return false;
 	}
 
@@ -224,7 +224,7 @@ extern (C) int _Dmain(string[] args)
 	globals.plugins = new Plugin[args.length-1];
 	for (int i = 1; i < args.length; i++)
 	{
-		if (!new_plugin(args[i].toStringz, &globals.plugins[i-1]))
+		if (!new_plugin(args[i], &globals.plugins[i-1]))
 			goto err;
 	}
 	if (globals.plugins.length == 0)

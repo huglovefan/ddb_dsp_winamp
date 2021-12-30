@@ -8,6 +8,13 @@ import core.sys.windows.ntdef;
 import core.sys.windows.winbase;
 import core.sys.windows.windef;
 
+import std.string : fromStringz, toStringz;
+
+string superbasename(string path)
+{
+	return superbasename(path.toStringz).fromStringz;
+}
+
 nothrow:
 @nogc:
 

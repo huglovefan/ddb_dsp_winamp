@@ -6,27 +6,29 @@ import core.stdc.string;
 import core.sys.windows.winbase;
 import core.sys.windows.windef;
 
+import std.algorithm.iteration : splitter;
+import std.algorithm.searching : startsWith;
+import std.conv : ConvException, to;
+import std.stdio : writefln;
+import std.string : fromStringz, indexOf, toStringz;
+
 import ddw.host.fmt;
 import ddw.host.main;
 import ddw.host.misc;
 import ddw.host.plugin;
 import ddw.host.winamp;
 
-debug = forceSafeBufferSizes;
+//debug = forceSafeBufferSizes;
 //debug = printParsedOptions;
-
-nothrow:
-@nogc:
 
 /**
  * apply default parameters for some known plugins
  * 
  * these can be overwritten by values specified on the command line
  */
-void apply_defaults(const(char)* path, PluginOpts* outp)
+void apply_defaults(string path, PluginOpts* outp)
 {
-	const(char)* dllname_ = superbasename(path);
-	string dllname = cast(immutable)dllname_[0..strlen(dllname_)];
+	string dllname = superbasename(path);
 
 	switch (dllname)
 	{
@@ -63,14 +65,13 @@ void apply_defaults(const(char)* path, PluginOpts* outp)
 /**
  * parse a command-line argument containing the dll path and some parameters
  */
-bool parse_plugin_options(const(char)* arg, PluginOpts* outp)
+bool parse_plugin_options(string s, PluginOpts* outp)
 {
-	char* s;
 	bool last;
 
 	struct Option
 	{
-		const(char)* name;
+		string name;
 		enum Type
 		{
 			OPT_UINT,
@@ -99,13 +100,6 @@ bool parse_plugin_options(const(char)* arg, PluginOpts* outp)
 		{"ch", Option.Type.OPT_STR, {s: &outp.ch}},
 	];
 
-	s = strdup(arg);
-	if (s == null)
-	{
-		perror("strdup");
-		return false;
-	}
-
 	// the default for process_max_frames is 576 to match the buffer size winamp uses
 	// (something to do with mp3 decoding)
 
@@ -118,70 +112,90 @@ bool parse_plugin_options(const(char)* arg, PluginOpts* outp)
 	outp.may_stretch = 1;
 	outp.doconf = 1;
 
-	do
+	foreach (part; s.splitter(':'))
 	{
-		char* end;
-		char* eq;
-		const(char)* name;
-		const(char)* value;
-
-		end = strchrnul(s, ':');
-		last = (*end == '\0');
-		*end = '\0';
-
 		if (outp.path == null)
 		{
-			outp.path = s;
-			apply_defaults(s, outp);
+			outp.path = cast(char*)part.toStringz;
+			apply_defaults(part, outp);
 			goto next;
 		}
-		if (*s >= '0' && *s <= '9' && atoi_ok(s, &outp.module_idx))
-			goto next;
 
-		eq = strchr(s, '=');
-		name = s;
-		value = eq+1;
-		if (eq) *eq = '\0';
-		else value = null;
+		// "goto skips declaration of (blah blah blah...)"
+		if (0)
+		{
+next:
+			continue;
+		}
+
+		string name, value;
+		uint eq = part.indexOf('=');
+		if (eq != -1)
+		{
+			name = part[0..eq];
+			value = part[eq+1..$];
+		}
+		else
+		{
+			name = part;
+		}
+
+		if (part[0] >= '0' && part[0] <= '9')
+		{
+			try
+			{
+				outp.module_idx = part.to!int;
+				continue;
+			}
+			catch (ConvException)
+			{
+			}
+		}
 
 		foreach (ref opt; options)
 		{
-			uint prefixlen = 0;
-			if (strcmp(name, opt.name) == 0)
+			size_t prefixlen;
+			if (opt.name == name)
 				goto match;
-			// accept prefixes for boolean option names
-			// "do": ignore, "no"/"not": negate the value
-			if (opt.type == Option.Type.OPT_BOOL &&
-				((strncmp(name, "do", prefixlen=2) == 0 && strcmp(name+prefixlen, opt.name) == 0) ||
-				(strncmp(name, "no", prefixlen=2) == 0 && strcmp(name+prefixlen, opt.name) == 0) ||
-				(strncmp(name, "not", prefixlen=3) == 0 && strcmp(name+prefixlen, opt.name) == 0)))
+			if (opt.type == Option.Type.OPT_BOOL)
 			{
-				goto match;
+				if (startsWith(name, "do") && name[2..$] == opt.name)
+					{ prefixlen = 2; goto match; }
+				if (startsWith(name, "no") && name[2..$] == opt.name)
+					{ prefixlen = 2; goto match; }
+				if (startsWith(name, "not") && name[3..$] == opt.name)
+					{ prefixlen = 3; goto match; }
 			}
 			continue;
 match:
 			switch (opt.type)
 			{
 			case Option.Type.OPT_UINT:
-				if (value == null)
+				try
 				{
-					fprintf(stderr, "missing value for option \"%s\"\n", name);
-					goto err;
+					*opt.v.u = value.to!uint;
 				}
-				if (!atoi_ok(value, opt.v.i))
+				catch (ConvException e)
 				{
-					fprintf(stderr, "failed to parse value \"%s\" for option \"%s\"\n", value, name);
+					writefln("failed to parse value \"%s\" for option \"%s\"", value, name);
 					goto err;
 				}
 				break;
 			case Option.Type.OPT_BOOL:
-				*opt.v.i = (value != null) ? !!atoi(value) : 1;
+				try
+				{
+					*opt.v.i = value.length > 0 ? value.to!int : 1;
+				}
+				catch (ConvException e)
+				{
+					writefln("failed to parse value \"%s\" for option \"%s\"", value, name);
+					goto err;
+				}
 				if (prefixlen != 0 && name[0] == 'n') // negated // <-- won't this bug out when the real name start with n?
 					*opt.v.i = !*opt.v.i;
 				break;
 			case Option.Type.OPT_STR:
-				free(*opt.v.s);
-				*opt.v.s = strdup(value);
+				*opt.v.s = cast(char*)value.toStringz;
 				break;
 			default:
 				assert(0, "option has invalid type");
@@ -189,7 +203,7 @@ match:
 			goto next;
 		}
 
-		if (strcmp(name, "safemode") == 0)
+		if (name == "safemode")
 		{
 			outp.process_min_frames = 576;
 			outp.process_max_frames = 576;
@@ -198,14 +212,11 @@ match:
 			goto next;
 		}
 
-		fprintf(stderr, "unrecognized option \"%s\"\n", s);
+		writefln("unrecognized option \"%s\"", part);
 		goto err;
-next:
-		s = end+1;
 	}
-	while (!last);
 
-	if (outp.path == null || *outp.path == '\0')
+	if (outp.path == null || outp.path[0] == '\0')
 		goto err;
 
 	debug (forceSafeBufferSizes)
@@ -217,20 +228,21 @@ next:
 
 	debug (printParsedOptions)
 	{
-		printf("%s:\n", superbasename(outp.path));
+		writefln("%s:", superbasename(outp.path).fromStringz);
+		writefln("  module_idx=%d", outp.module_idx);
 
 		foreach (ref opt; options)
 		{
 			switch (opt.type)
 			{
 				case Option.Type.OPT_UINT:
-					printf("  %s=%u\n", opt.name, *opt.v.u);
+					writefln("  %s=%u", opt.name, *opt.v.u);
 					break;
 				case Option.Type.OPT_BOOL:
-					printf("  %s=%d\n", opt.name, *opt.v.i);
+					writefln("  %s=%d", opt.name, *opt.v.i);
 					break;
 				case Option.Type.OPT_STR:
-					printf("  %s=\"%s\"\n", opt.name, *opt.v.s);
+					writefln("  %s=\"%s\"", opt.name, fromStringz(*opt.v.s));
 					break;
 				default:
 					assert(0, "option has invalid type");
@@ -264,9 +276,43 @@ next:
 
 	return true;
 err:
-	free(s);
 	outp.path = null;
 	return false;
+}
+
+unittest
+{
+	PluginOpts opts;
+
+	assert(parse_plugin_options("dsp_stereo_tool.dll", &opts));
+	assert(opts.path.fromStringz == "dsp_stereo_tool.dll");
+	assert(opts.module_idx == MODULE_IDX_DEFAULT);
+	assert(opts.required); // apply_defaults()
+
+	assert(parse_plugin_options("dsp_unknown.dll:1", &opts));
+	assert(opts.path.fromStringz == "dsp_unknown.dll");
+	assert(opts.module_idx == 1);
+	assert(!opts.required);
+
+	assert(parse_plugin_options("dsp_unknown.dll:2:required", &opts));
+	assert(opts.path.fromStringz == "dsp_unknown.dll");
+	assert(opts.module_idx == 2);
+	assert(opts.required);
+
+	assert(parse_plugin_options(
+		"dsp_unknown.dll:9:pmf=10:pMf=20:pfm=5:stretch:nostretch:dostretch:stretch=0:stretch=1:conf:noconf:doconf:conf=0:conf=1:required:notrequired:required=0:required=1:trace:notrace:trace=0:trace=1:rate=8000,44100:bits=8,24:ch=1,2", &opts));
+	assert(opts.path.fromStringz == "dsp_unknown.dll");
+	assert(opts.module_idx == 9);
+	assert(opts.process_min_frames == 10);
+	assert(opts.process_max_frames == 20);
+	assert(opts.process_frames_mult == 5);
+	assert(opts.may_stretch);
+	assert(opts.doconf);
+	assert(opts.required);
+	assert(opts.trace);
+	assert(opts.rate.fromStringz == "8000,44100");
+	assert(opts.bits.fromStringz == "8,24");
+	assert(opts.ch.fromStringz == "1,2");
 }
 
 /**
@@ -359,7 +405,7 @@ err:
 	return false;
 }
 
-bool match_string(const(char)* spec, const(char)* value) pure
+bool match_string(const(char)* spec, const(char)* value) pure nothrow @nogc
 {
 	const(char)* p = spec;
 	const(char)* end;
@@ -391,7 +437,7 @@ bool match_string(const(char)* spec, const(char)* value) pure
  * 
  * if the format is supported, returns null
  */
-const(char)* plugin_supports_format(const(Plugin)* pl, const(Fmt)* fmt)
+const(char)* plugin_supports_format(const(Plugin)* pl, const(Fmt)* fmt) nothrow @nogc
 {
 	char[16] ratestr;
 	char[16] bitstr;
