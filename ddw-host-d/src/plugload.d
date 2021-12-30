@@ -25,32 +25,38 @@ nothrow:
  */
 void apply_defaults(const(char)* path, PluginOpts* outp)
 {
-	const(char)* dllname = superbasename(path);
+	const(char)* dllname_ = superbasename(path);
+	string dllname = cast(immutable)dllname_[0..strlen(dllname_)];
 
-	if (strcmp(dllname, "dsp_centercut.dll") == 0)
+	switch (dllname)
 	{
-		outp.doconf = 0;
-		outp.bits = strdup("16,24,32"); // 8 = loud
-	}
-	else if (strcmp(dllname, "dsp_freeverb.dll") == 0)
-	{
-		outp.may_stretch = false;
-		outp.bits = strdup("8,16,32"); // 24 = static. probably only really works with 16
-	}
-	else if (strcmp(dllname, "dsp_pacemaker.dll") == 0)
-	{
-		outp.doconf = 0;
-		outp.bits = strdup("16,24,32"); // 8 = distorts when stretching
-	}
-	else if (strcmp(dllname, "dsp_sps.dll") == 0)
-	{
-		outp.bits = strdup("16"); // only 16 works properly
-	}
-	else if (strcmp(dllname, "dsp_stereo_tool.dll") == 0)
-	{
-		outp.may_stretch = false;
-		outp.bits = strdup("16,24,32"); // 8 = loud
-		outp.required = true;
+		case "dsp_centercut.dll":
+			outp.doconf = 0;
+			outp.bits = strdup("16,24,32"); // 8 = loud
+			break;
+
+		case "dsp_freeverb.dll":
+			outp.may_stretch = false;
+			outp.bits = strdup("8,16,32"); // 24 = static. probably only really works with 16
+			break;
+
+		case "dsp_pacemaker.dll":
+			outp.doconf = 0;
+			outp.bits = strdup("16,24,32"); // 8 = distorts when stretching
+			break;
+
+		case "dsp_sps.dll":
+			outp.bits = strdup("16"); // only 16 works properly
+			break;
+
+		case "dsp_stereo_tool.dll":
+			outp.may_stretch = false;
+			outp.bits = strdup("16,24,32"); // 8 = loud
+			outp.required = true;
+			break;
+
+		default:
+			break;
 	}
 }
 
