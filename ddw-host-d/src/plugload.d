@@ -360,7 +360,7 @@ err:
 	return false;
 }
 
-bool match_string(const(char)* spec, const(char)* value)
+bool match_string(const(char)* spec, const(char)* value) pure
 {
 	const(char)* p = spec;
 	const(char)* end;
@@ -392,7 +392,7 @@ bool match_string(const(char)* spec, const(char)* value)
  * 
  * if the format is supported, returns null
  */
-const(char)* plugin_supports_format(Plugin* pl, const(Fmt)* fmt)
+const(char)* plugin_supports_format(const(Plugin)* pl, const(Fmt)* fmt)
 {
 	char[16] ratestr;
 	char[16] bitstr;

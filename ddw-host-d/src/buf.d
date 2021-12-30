@@ -107,12 +107,12 @@ void buf_swap(Buf* self, Buf* other)
 	*other = tmp;
 }
 
-void buf_append_buf(Buf* self, Buf* other)
+void buf_append_buf(Buf* self, const(Buf)* other)
 {
 	buf_append(self, other.p, other.sz);
 }
 
-void buf_prepend_buf(Buf* self, Buf* other)
+void buf_prepend_buf(Buf* self, const(Buf)* other)
 {
 	assert(self.res >= other.sz);
 
@@ -124,7 +124,7 @@ void buf_prepend_buf(Buf* self, Buf* other)
 	self.res -= other.sz;
 }
 
-buf_bound buf_boundscheck_read(Buf* self, const(char)* p, size_t sz)
+buf_bound buf_boundscheck_read(const(Buf)* self, const(char)* p, size_t sz) pure
 {
 	buf_bound flags = buf_bound.BUF_NONE;
 	size_t offset;
@@ -158,7 +158,7 @@ Lout:
 //
 // same as buf_boundscheck_read() but checks are with self.cap instead of self.sz
 //
-buf_bound buf_boundscheck_write(Buf* self, const(char)* p, size_t sz)
+buf_bound buf_boundscheck_write(const(Buf)* self, const(char)* p, size_t sz) pure
 {
 	buf_bound flags = buf_bound.BUF_NONE;
 	size_t offset;
@@ -189,12 +189,12 @@ Lout:
 	return flags;
 }
 
-buf_bound buf_boundscheck_read(Buf* self, const(char)[] p)
+buf_bound buf_boundscheck_read(const(Buf)* self, const(char)[] p) pure
 {
 	return buf_boundscheck_read(self, p.ptr, p.length);
 }
 
-buf_bound buf_boundscheck_write(Buf* self, const(char)[] p)
+buf_bound buf_boundscheck_write(const(Buf)* self, const(char)[] p) pure
 {
 	return buf_boundscheck_write(self, p.ptr, p.length);
 }
