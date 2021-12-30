@@ -29,7 +29,7 @@ extern (Windows) uint process_thread_main(void* ud)
 	for (;;)
 	{
 		processing_request req = void;
-		if (!read_full(in_fd, &req, req.sizeof))
+		if (!read_full(globals.datapipe.in_fd, &req, req.sizeof))
 			goto read1fail;
 
 		Fmt curfmt = {
@@ -42,14 +42,14 @@ extern (Windows) uint process_thread_main(void* ud)
 
 		if (curfmt != lastfmt)
 		{
-			if (!fmtchange(plugins, &curfmt))
+			if (!fmtchange(globals.plugins, &curfmt))
 				goto err;
 
 			lastfmt = curfmt;
 		}
 
 		size_t restotal = 0;
-		foreach (ref pl; plugins)
+		foreach (ref pl; globals.plugins)
 		{
 			if (!pl.skip)
 				restotal += pl.buf.sz;
@@ -59,20 +59,20 @@ extern (Windows) uint process_thread_main(void* ud)
 		buf_prepare_append(&data, restotal + cast(size_t)req.buffer_size);
 		buf_init_reserved(&data, restotal);
 		buf_register_append(&data, cast(size_t)req.buffer_size);
-		if (!read_full(in_fd, data.p, cast(size_t)req.buffer_size))
+		if (!read_full(globals.datapipe.in_fd, data.p, cast(size_t)req.buffer_size))
 			goto readerr;
 
-		plugin_process_all(plugins, &curfmt, &data, &tmp);
+		plugin_process_all(globals.plugins, &curfmt, &data, &tmp);
 
 		processing_response res = {
 			buffer_size: data.sz,
 		};
-		if (!write_full(out_fd, &res, res.sizeof))
+		if (!write_full(globals.datapipe.out_fd, &res, res.sizeof))
 			goto writeerr;
 
 		if (data.sz != 0)
 		{
-			if (!write_full(out_fd, data.p, data.sz))
+			if (!write_full(globals.datapipe.out_fd, data.p, data.sz))
 				goto writeerr;
 
 			buf_clear(&data);
@@ -81,7 +81,7 @@ extern (Windows) uint process_thread_main(void* ud)
 Lout:
 	buf_free(&data);
 	buf_free(&tmp);
-	PostThreadMessage(main_tid, WM_QUIT,
+	PostThreadMessage(globals.main_tid, WM_QUIT,
 		/* wParam */ thread_rv,
 		/* lParam */ 0);
 	return 0;

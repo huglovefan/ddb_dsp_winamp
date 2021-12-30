@@ -330,7 +330,7 @@ bool load_plugin(Plugin* pl)
 	}
 
 	module_.hDllInstance = dll;
-	module_.hwndParent = mainwin;
+	module_.hwndParent = globals.mainwin;
 
 	// DSP.H: "0 on success"
 	init_rv = module_.Init(module_);

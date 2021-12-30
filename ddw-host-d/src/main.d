@@ -19,15 +19,25 @@ import ddw.host.procmain;
 import ddw.host.shm;
 import ddw.host.wndproc;
 
-__gshared int in_fd = -1;
-__gshared int out_fd = -1;
+struct globals
+{
+	__gshared static:
 
-__gshared Shm* shm;
+	Plugin[] plugins;
 
-__gshared Plugin[] plugins;
+	Shm* shm;
 
-__gshared HWND mainwin;
-__gshared DWORD main_tid;
+	HWND mainwin;
+	DWORD main_tid;
+
+	static struct datapipe
+	{
+		__gshared static:
+
+		int in_fd = -1;
+		int out_fd = -1;
+	}
+}
 
 // -----------------------------------------------------------------------------
 
@@ -119,7 +129,7 @@ extern (C) int _Dmain(string[] args)
 	void* procthread = null;
 	int rv = 0;
 
-	main_tid = GetCurrentThreadId();
+	globals.main_tid = GetCurrentThreadId();
 
 	//
 	// set up fds
@@ -129,8 +139,8 @@ extern (C) int _Dmain(string[] args)
 
 		bool nok =
 			(nul = open("NUL", O_RDWR)) == -1 || // open NUL for redirecting
-			(in_fd = dup(STDIN_FILENO)) == -1 || // duplicate stdin to in_fd
-			(out_fd = dup(STDOUT_FILENO)) == -1 || // duplicate stdout to out_fd
+			(globals.datapipe.in_fd = dup(STDIN_FILENO)) == -1 || // duplicate stdin to in_fd
+			(globals.datapipe.out_fd = dup(STDOUT_FILENO)) == -1 || // duplicate stdout to out_fd
 			dup2(nul, STDIN_FILENO) == -1 || // set stdin to the /dev/null fd
 			dup2(STDERR_FILENO, STDOUT_FILENO) == -1; // set stdout to stderr
 
@@ -155,8 +165,8 @@ extern (C) int _Dmain(string[] args)
 	//
 	if (getenv("DDW_SHM_NAME") != null)
 	{
-		shm = cast(Shm*)shmnew(getenv("DDW_SHM_NAME"), Shm.sizeof);
-		if (shm == null)
+		globals.shm = cast(Shm*)shmnew(getenv("DDW_SHM_NAME"), Shm.sizeof);
+		if (globals.shm == null)
 			fprintf(stderr, "warning: shm open failed\n");
 	}
 	else
@@ -171,7 +181,7 @@ extern (C) int _Dmain(string[] args)
 	{
 		WNDCLASSEX wx = {
 			cbSize: WNDCLASSEX.sizeof,
-			lpfnWndProc: (shm != null)
+			lpfnWndProc: (globals.shm != null)
 				? cast(typeof(&DefWindowProc))&WindowProc // cast to nothrow
 				: &DefWindowProc,
 			hInstance: GetModuleHandle(null),
@@ -183,7 +193,7 @@ extern (C) int _Dmain(string[] args)
 			goto err;
 		}
 
-		mainwin = CreateWindowEx(
+		globals.mainwin = CreateWindowEx(
 			0,
 			wx.lpszClassName,
 			"Winamp",
@@ -193,7 +203,7 @@ extern (C) int _Dmain(string[] args)
 			null,
 			wx.hInstance,
 			null);
-		if (mainwin == null)
+		if (globals.mainwin == null)
 		{
 			PrintError("CreateWindowEx");
 			goto err;
@@ -211,13 +221,13 @@ extern (C) int _Dmain(string[] args)
 	//
 	// load plugins
 	//
-	plugins = new Plugin[args.length-1];
+	globals.plugins = new Plugin[args.length-1];
 	for (int i = 1; i < args.length; i++)
 	{
-		if (!new_plugin(args[i].toStringz, &plugins[i-1]))
+		if (!new_plugin(args[i].toStringz, &globals.plugins[i-1]))
 			goto err;
 	}
-	if (plugins.length == 0)
+	if (globals.plugins.length == 0)
 	{
 		fprintf(stderr, "it works\n");
 		goto err;
@@ -242,7 +252,7 @@ extern (C) int _Dmain(string[] args)
 	//
 	// call config() for plugins that need it
 	//
-	foreach (ref pl; plugins)
+	foreach (ref pl; globals.plugins)
 	{
 		if (!pl.opts.doconf)
 		{
@@ -288,9 +298,9 @@ Lout:
 		procthread = null;
 	}
 
-	while (plugins.length != 0)
+	while (globals.plugins.length != 0)
 	{
-		Plugin* pl = &plugins[$-1];
+		Plugin* pl = &globals.plugins[$-1];
 
 		if (pl.confdone)
 		{
@@ -300,7 +310,7 @@ Lout:
 
 		buf_free(&pl.buf);
 
-		plugins = plugins[0..$-1];
+		globals.plugins = globals.plugins[0..$-1];
 	}
 
 	return rv;

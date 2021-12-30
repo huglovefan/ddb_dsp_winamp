@@ -49,6 +49,7 @@ extern (Windows) LRESULT WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM 
 	//
 	// this file best viewed with narrow tabs
 	//
+	alias shm = globals.shm;
 	switch (uMsg)
 	{
 		case WM_COPYDATA: // 0x004A
