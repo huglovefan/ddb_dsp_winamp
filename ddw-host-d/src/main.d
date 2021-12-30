@@ -290,7 +290,7 @@ Lout:
 	{
 		Plugin* pl = &plugins[$-1];
 
-		if (!pl.confdone)
+		if (pl.confdone)
 		{
 			pl.module_.Quit(pl.module_);
 			FreeLibrary(pl.dll);
