@@ -1,7 +1,5 @@
 module ddw.host.wndproc;
 
-version (Windows):
-
 import core.stdc.stdio;
 
 import core.sys.windows.winbase;

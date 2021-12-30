@@ -2,16 +2,8 @@ module ddw.host.winamp;
 
 extern (C):
 
-version (Windows)
-{
-	import core.sys.windows.windef;
-	import core.sys.windows.winuser;
-}
-else
-{
-	alias void* HINSTANCE;
-	alias void* HWND;
-}
+import core.sys.windows.windef;
+import core.sys.windows.winuser;
 
 // -----------------------------------------------------------------------------
 
@@ -37,8 +29,6 @@ struct winampDSPHeader
 alias winampDSPHeader* function() nothrow @nogc winampDSPGetHeaderType;
 
 // -----------------------------------------------------------------------------
-
-version (Windows):
 
 enum WM_WA_IPC = WM_USER;
 enum IPC_GETOUTPUTTIME = 105;

@@ -19,7 +19,7 @@ import ddw.host.plugproc;
 nothrow:
 @nogc:
 
-extern (System) uint process_thread_main(void* ud)
+extern (Windows) uint process_thread_main(void* ud)
 {
 	Buf data;
 	Buf tmp;
@@ -81,7 +81,7 @@ extern (System) uint process_thread_main(void* ud)
 Lout:
 	buf_free(&data);
 	buf_free(&tmp);
-	version (Windows) PostThreadMessage(main_tid, WM_QUIT,
+	PostThreadMessage(main_tid, WM_QUIT,
 		/* wParam */ thread_rv,
 		/* lParam */ 0);
 	return 0;

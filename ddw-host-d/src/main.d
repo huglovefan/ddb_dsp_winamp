@@ -56,13 +56,10 @@ bool new_plugin(const(char)* arg, Plugin* pl)
 		return false;
 	}
 
-	version (Windows)
+	if (!load_plugin(pl))
 	{
-		if (!load_plugin(pl))
-		{
-			fprintf(stderr, "error: plugin load failed for dll \"%s\"\n", pl.opts.path);
-			return false;
-		}
+		fprintf(stderr, "error: plugin load failed for dll \"%s\"\n", pl.opts.path);
+		return false;
 	}
 
 	return true;
@@ -70,7 +67,7 @@ bool new_plugin(const(char)* arg, Plugin* pl)
 
 // -----------------------------------------------------------------------------
 
-version (Windows) int mainloop()
+int mainloop()
 {
 	MSG msg;
 	int status = 0;
@@ -98,7 +95,7 @@ version (Windows) int mainloop()
 	return status;
 }
 
-extern (System) uint conf_thread_main(void* ud)
+extern (Windows) uint conf_thread_main(void* ud)
 {
 	Plugin* pl = cast(Plugin*)ud;
 	pl.module_.Config(pl.module_);
@@ -120,7 +117,7 @@ extern (C) int _Dmain(string[] args)
 	void* procthread = null;
 	int rv = 0;
 
-	version (Windows) main_tid = GetCurrentThreadId();
+	main_tid = GetCurrentThreadId();
 
 	//
 	// set up fds
@@ -147,78 +144,66 @@ extern (C) int _Dmain(string[] args)
 			goto err;
 		}
 
-		version (Windows)
-		{
-			setvbuf(stdout, null, _IONBF, 0);
-			setvbuf(stderr, null, _IONBF, 0);
-		}
+		setvbuf(stdout, null, _IONBF, 0);
+		setvbuf(stderr, null, _IONBF, 0);
 	}
 
 	//
 	// open shm file
 	//
-	version (Windows)
+	if (getenv("DDW_SHM_NAME") != null)
 	{
-		if (getenv("DDW_SHM_NAME") != null)
-		{
-			shm = cast(Shm*)shmnew(getenv("DDW_SHM_NAME"), Shm.sizeof);
-			if (shm == null)
-				fprintf(stderr, "warning: shm open failed\n");
-		}
-		else
-		{
-			fprintf(stderr, "warning: DDW_SHM_NAME not set\n");
-		}
+		shm = cast(Shm*)shmnew(getenv("DDW_SHM_NAME"), Shm.sizeof);
+		if (shm == null)
+			fprintf(stderr, "warning: shm open failed\n");
+	}
+	else
+	{
+		fprintf(stderr, "warning: DDW_SHM_NAME not set\n");
 	}
 
 	//
 	// create IPC message window
 	// https://stackoverflow.com/a/4081383
 	//
-	version (Windows)
 	{
+		WNDCLASSEX wx = {
+			cbSize: WNDCLASSEX.sizeof,
+			lpfnWndProc: (shm != null)
+				? cast(typeof(&DefWindowProc))&WindowProc // cast to nothrow
+				: &DefWindowProc,
+			hInstance: GetModuleHandle(null),
+			lpszClassName: "Winamp v1.x",
+		};
+		if (RegisterClassEx(&wx) == 0)
 		{
-			WNDCLASSEX wx = {
-				cbSize: WNDCLASSEX.sizeof,
-				lpfnWndProc: (shm != null)
-					? cast(typeof(&DefWindowProc))&WindowProc // cast to nothrow
-					: &DefWindowProc,
-				hInstance: GetModuleHandle(null),
-				lpszClassName: "Winamp v1.x",
-			};
-			if (RegisterClassEx(&wx) == 0)
-			{
-				PrintError("RegisterClassEx");
-				goto err;
-			}
+			PrintError("RegisterClassEx");
+			goto err;
+		}
 
-			mainwin = CreateWindowEx(
-				0,
-				wx.lpszClassName,
-				"Winamp",
-				0,
-				0, 0, 0, 0,
-				HWND_MESSAGE,
-				null,
-				wx.hInstance,
-				null);
-			if (mainwin == null)
-			{
-				PrintError("CreateWindowEx");
-				goto err;
-			}
+		mainwin = CreateWindowEx(
+			0,
+			wx.lpszClassName,
+			"Winamp",
+			0,
+			0, 0, 0, 0,
+			HWND_MESSAGE,
+			null,
+			wx.hInstance,
+			null);
+		if (mainwin == null)
+		{
+			PrintError("CreateWindowEx");
+			goto err;
 		}
 	}
 
 	//
 	// ancient ritual
 	//
-	version (Windows)
 	{
-		{
-			MSG tmp;
-			PeekMessage(&tmp, null, 0, 0, PM_NOREMOVE);
-		}
+		MSG tmp;
+		PeekMessage(&tmp, null, 0, 0, PM_NOREMOVE);
 	}
 
 	//
@@ -250,77 +235,66 @@ extern (C) int _Dmain(string[] args)
 	//
 	// start processing thread
 	//
-	version (Windows)
+	procthread = CreateThread(
+		null,
+		16*1024*1024,
+		&process_thread_main,
+		null,
+		STACK_SIZE_PARAM_IS_A_RESERVATION,
+		null);
+	if (procthread == null)
 	{
-		procthread = CreateThread(
-			null,
-			16*1024*1024,
-			&process_thread_main,
-			null,
-			STACK_SIZE_PARAM_IS_A_RESERVATION,
-			null);
-
-		if (procthread == null)
-		{
-			PrintError("CreateThread");
-			goto err;
-		}
+		PrintError("CreateThread");
+		goto err;
 	}
 
 	//
 	// call config() for plugins that need it
 	//
-	version (Windows)
+	foreach (ref pl; plugins)
 	{
-		foreach (ref pl; plugins)
+		if (!pl.opts.doconf)
 		{
-			if (!pl.opts.doconf)
-			{
-				pl.confdone = true;
-				continue;
-			}
-
-			pl.confdone = false;
-
-			HANDLE confthread = CreateThread(
-				null,
-				0,
-				&conf_thread_main,
-				&pl,
-				0,
-				null);
-
-			if (confthread == null)
-			{
-				PrintError("CreateThread");
-				pl.confdone = true;
-				continue;
-			}
-
-			CloseHandle(confthread);
+			pl.confdone = true;
+			continue;
 		}
+
+		pl.confdone = false;
+
+		HANDLE confthread = CreateThread(
+			null,
+			0,
+			&conf_thread_main,
+			&pl,
+			0,
+			null);
+
+		if (confthread == null)
+		{
+			PrintError("CreateThread");
+			pl.confdone = true;
+			continue;
+		}
+
+		CloseHandle(confthread);
 	}
 
 	//
 	// run main loop
 	//
-	version (Windows)
-		rv = mainloop();
+	rv = mainloop();
 
 	//
 	// wait (2000ms) for the processing thread to exit
 	//
 Lout:
-	version (Windows)
+	if (procthread != null)
 	{
-		if (procthread != null)
-		{
-			if (WaitForSingleObject(procthread, 2000) != WAIT_OBJECT_0)
-				assert(0, "failed to join thread in 2000ms");
+		if (WaitForSingleObject(procthread, 2000) != WAIT_OBJECT_0)
+			assert(0, "failed to join thread in 2000ms");
 
-			CloseHandle(procthread);
-			procthread = null;
-		}
+		CloseHandle(procthread);
+		procthread = null;
 	}
 
 	while (plugins.length != 0)
@@ -330,8 +304,7 @@ Lout:
 		if (!pl.confdone)
 		{
 			pl.module_.Quit(pl.module_);
-			version (Windows)
-				FreeLibrary(pl.dll);
+			FreeLibrary(pl.dll);
 		}
 
 		buf_free(&pl.buf);

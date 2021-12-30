@@ -272,7 +272,6 @@ err:
 /**
  * loads and initializes the dll of a plugin according to its parsed options
  */
-version (Windows)
 bool load_plugin(Plugin* pl)
 {
 	HANDLE dll;

@@ -98,8 +98,6 @@ again:
 	goto again;
 }
 
-version (Windows):
-
 extern (Windows) ULONG RtlNtStatusToDosError(NTSTATUS Status);
 
 const(char)* NtStrError(NTSTATUS Status)
