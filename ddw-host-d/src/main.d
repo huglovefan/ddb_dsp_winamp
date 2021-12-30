@@ -209,10 +209,7 @@ extern (C) int _Dmain(string[] args)
 	//
 	// load plugins
 	//
-	{
-		Plugin* pluginsp = cast(Plugin*)calloc(args.length-1, Plugin.sizeof);
-		plugins = pluginsp[0..args.length-1];
-	}
+	plugins = new Plugin[args.length-1];
 	for (int i = 1; i < args.length; i++)
 	{
 		if (!new_plugin(args[i].toStringz, &plugins[i-1]))
