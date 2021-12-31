@@ -1,6 +1,7 @@
 module ddw.host.procmain;
 
 import core.stdc.errno;
+import core.stdc.stdint;
 import core.stdc.stdio;
 
 import core.sys.windows.winbase;
@@ -47,8 +48,9 @@ extern (Windows) uint process_thread_main(void* ud)
 			bps: req.bitspersample,
 			ch: req.channels,
 		};
-		assert(fmt_makes_sense(&curfmt));
-		assert(req.buffer_size % fmt_frame_size(&curfmt) == 0);
+
+		if (!checkreadparams(&curfmt, req.buffer_size))
+			goto err;
 
 		if (curfmt != lastfmt)
 		{
@@ -120,6 +122,37 @@ readerr:
 // -----------------------------------------------------------------------------
 
 private:
+
+/**
+ * check that the format and buffer size match and aren't random data
+ */
+bool checkreadparams(const(Fmt)* fmt, uint64_t buffer_size)
+{
+	bool ok = true;
+
+	if (!fmt_makes_sense(fmt))
+	{
+		writefln("error: read nonsensical input format: rate=%s bps=%s ch=%s",
+			fmt.rate, fmt.bps, fmt.ch);
+		ok = false;
+	}
+
+	if (buffer_size > size_t.max)
+	{
+		writefln("error: input data size %s doesn't fit in size_t",
+			buffer_size);
+		ok = false;
+	}
+
+	if ((buffer_size % fmt_frame_size(fmt)) != 0)
+	{
+		writefln("error: input data size %s is not a multiple of frame size %s",
+			buffer_size, fmt_frame_size(fmt));
+		ok = false;
+	}
+
+	return ok;
+}
 
 /**
  * process a format change
