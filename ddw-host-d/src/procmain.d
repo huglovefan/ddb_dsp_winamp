@@ -7,6 +7,9 @@ import core.sys.windows.winbase;
 import core.sys.windows.windef;
 import core.sys.windows.winuser;
 
+import core.thread.osthread : rt_moduleTlsCtor, rt_moduleTlsDtor, thread_attachThis;
+import core.thread.threadbase : thread_detachThis;
+
 import std.stdio : writefln;
 
 import ddw.pipedata;
@@ -24,6 +27,14 @@ extern (Windows) uint process_thread_main(void* ud)
 	Buf tmp;
 	Fmt lastfmt;
 	int thread_rv = 0;
+
+	thread_attachThis();
+	rt_moduleTlsCtor();
+	scope (exit)
+	{
+		rt_moduleTlsDtor();
+		thread_detachThis();
+	}
 
 	for (;;)
 	{
