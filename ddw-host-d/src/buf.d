@@ -10,7 +10,7 @@ nothrow:
 
 struct Buf
 {
-	char* p;
+	void* p;
 	size_t sz; /// used size
 	size_t cap; /// total capacity
 
@@ -35,9 +35,9 @@ enum buf_bound
 
 void buf_prepare_capacity(Buf* self, size_t req)
 {
-	char* realp;
+	void* realp;
 	size_t realcap;
-	char* newp;
+	void* newp;
 	size_t newcap;
 
 	// already have that much?
@@ -55,7 +55,7 @@ void buf_prepare_capacity(Buf* self, size_t req)
 	while (newcap < req)
 		newcap *= 2;
 
-	newp = cast(char*)realloc(realp, newcap);
+	newp = realloc(realp, newcap);
 	assert(newp != null);
 
 	self.p = newp+self.res;
@@ -74,7 +74,7 @@ void buf_register_append(Buf* self, size_t sz)
 	self.sz += sz;
 }
 
-void buf_append(Buf* self, const(char)* p, size_t sz)
+void buf_append(Buf* self, const(void)* p, size_t sz)
 {
 	buf_prepare_append(self, sz);
 
@@ -124,7 +124,7 @@ void buf_prepend_buf(Buf* self, const(Buf)* other)
 	self.res -= other.sz;
 }
 
-buf_bound buf_boundscheck_read(const(Buf)* self, const(char)* p, size_t sz) pure
+buf_bound buf_boundscheck_read(const(Buf)* self, const(void)* p, size_t sz) pure
 {
 	buf_bound flags = buf_bound.BUF_NONE;
 	size_t offset;
@@ -158,7 +158,7 @@ Lout:
 //
 // same as buf_boundscheck_read() but checks are with self.cap instead of self.sz
 //
-buf_bound buf_boundscheck_write(const(Buf)* self, const(char)* p, size_t sz) pure
+buf_bound buf_boundscheck_write(const(Buf)* self, const(void)* p, size_t sz) pure
 {
 	buf_bound flags = buf_bound.BUF_NONE;
 	size_t offset;
@@ -189,12 +189,12 @@ Lout:
 	return flags;
 }
 
-buf_bound buf_boundscheck_read(const(Buf)* self, const(char)[] p) pure
+buf_bound buf_boundscheck_read(const(Buf)* self, const(void)[] p) pure
 {
 	return buf_boundscheck_read(self, p.ptr, p.length);
 }
 
-buf_bound buf_boundscheck_write(const(Buf)* self, const(char)[] p) pure
+buf_bound buf_boundscheck_write(const(Buf)* self, const(void)[] p) pure
 {
 	return buf_boundscheck_write(self, p.ptr, p.length);
 }
@@ -234,7 +234,7 @@ void buf_increase_reserved(Buf* self, size_t sz)
 
 unittest { with (buf_bound)
 {
-	char[5] data = "hi";
+	void[5] data = cast(void[])"hi\0\0\0";
 	Buf b = {
 		p: data.ptr,
 		sz: 2,
@@ -256,31 +256,32 @@ unittest { with (buf_bound)
 
 unittest { with (buf_bound)
 {
-	char[80] data = "the quick brown fox ju";
+	void[30] data = cast(void[])"the quick brown fox ju\0\0\0\0\0\0\0\0";
+	size_t datalen = strlen(cast(char*)data.ptr);
 	Buf b = {
 		p: data.ptr,
-		sz: strlen(data.ptr),
+		sz: datalen,
 		cap: data.sizeof,
 	};
 	int x;
 
 	// unrelated pointers
-	assert(buf_boundscheck_read(&b, cast(char*)&x, 0) == 0);
-	assert(buf_boundscheck_write(&b, cast(char*)&x, 0) == 0);
+	assert(buf_boundscheck_read(&b, cast(void*)&x, 0) == 0);
+	assert(buf_boundscheck_write(&b, cast(void*)&x, 0) == 0);
 
 	// read
 
 	assert(buf_boundscheck_read(&b, b.p, 1) == (BUF_TRUE|BUF_LEFTEDGE));
 	assert(buf_boundscheck_read(&b, b.p+1, 1) == (BUF_TRUE));
 
-	assert(buf_boundscheck_read(&b, b.p, strlen(data.ptr)) == (BUF_TRUE|BUF_LEFTEDGE|BUF_RIGHTEDGE));
-	assert(buf_boundscheck_read(&b, b.p, strlen(data.ptr)+1) == 0);
+	assert(buf_boundscheck_read(&b, b.p, datalen) == (BUF_TRUE|BUF_LEFTEDGE|BUF_RIGHTEDGE));
+	assert(buf_boundscheck_read(&b, b.p, datalen+1) == 0);
 
-	assert(buf_boundscheck_read(&b, b.p, strlen(data.ptr)-1) == (BUF_TRUE|BUF_LEFTEDGE));
-	assert(buf_boundscheck_read(&b, b.p+1, strlen(data.ptr)-1) == (BUF_TRUE|BUF_RIGHTEDGE));
+	assert(buf_boundscheck_read(&b, b.p, datalen-1) == (BUF_TRUE|BUF_LEFTEDGE));
+	assert(buf_boundscheck_read(&b, b.p+1, datalen-1) == (BUF_TRUE|BUF_RIGHTEDGE));
 
-	assert(buf_boundscheck_read(&b, b.p+strlen(data.ptr)-2, 1) == (BUF_TRUE));
-	assert(buf_boundscheck_read(&b, b.p+strlen(data.ptr)-1, 1) == (BUF_TRUE|BUF_RIGHTEDGE));
+	assert(buf_boundscheck_read(&b, b.p+datalen-2, 1) == (BUF_TRUE));
+	assert(buf_boundscheck_read(&b, b.p+datalen-1, 1) == (BUF_TRUE|BUF_RIGHTEDGE));
 
 	// write
 

@@ -127,13 +127,13 @@ void plugin_process_twobuf_or_just_one(
 		buf_init_reserved(tmp, data.res);
 	}
 
-	const(char*) readstart = data.p;
-	const(char)* readp     = data.p;
-	const(char*) readend   = data.p + data.sz;
+	const(void*) readstart = data.p;
+	const(void)* readp     = data.p;
+	const(void*) readend   = data.p + data.sz;
 
-	const(char*) writestart = tmp.p;
-	char*        writep     = tmp.p;
-	const(char*) writeend   = tmp.p + tmp.cap;
+	const(void*) writestart = tmp.p;
+	void*        writep     = tmp.p;
+	const(void*) writeend   = tmp.p + tmp.cap;
 
 	while (readp < readend && writep < writeend)
 	{
@@ -181,9 +181,9 @@ void plugin_process_twobuf_or_just_one(
 void ModifySamples_s(
 	Plugin* pl,
 	const(Fmt)* fmt,
-	const(char)* inbuf,
+	const(void)* inbuf,
 	uint* inbuf_frames_out,
-	char* outbuf,
+	void* outbuf,
 	uint* outbuf_frames_out)
 {
 	const(size_t) fs = fmt_frame_size(fmt);
