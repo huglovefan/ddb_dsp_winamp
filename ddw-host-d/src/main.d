@@ -7,6 +7,7 @@ import core.sys.windows.winbase;
 import core.sys.windows.windef;
 import core.sys.windows.winuser;
 
+import std.stdio : writefln;
 import std.string : toStringz;
 
 import ddw.shmdata;
@@ -64,13 +65,13 @@ bool new_plugin(string arg, Plugin* pl)
 {
 	if (!parse_plugin_options(arg, &pl.opts))
 	{
-		fprintf(stderr, "error: option parsing failed for argument \"%s\"\n", arg.toStringz);
+		writefln("error: option parsing failed for argument \"%s\"", arg);
 		return false;
 	}
 
 	if (!load_plugin(pl))
 	{
-		fprintf(stderr, "error: plugin load failed for dll \"%s\"\n", pl.opts.path);
+		writefln("error: plugin load failed for dll \"%s\"", pl.opts.path);
 		return false;
 	}
 

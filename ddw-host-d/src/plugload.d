@@ -106,7 +106,7 @@ bool parse_plugin_options(string s, PluginOpts* outp)
 	{
 		if (outp.path == null)
 		{
-			outp.path = cast(char*)part.toStringz;
+			outp.path = part;
 			apply_defaults(part, outp);
 			goto next;
 		}
@@ -316,28 +316,28 @@ bool load_plugin(Plugin* pl)
 	winampDSPModule* module_ = null;
 	int init_rv;
 
-	dll = LoadLibraryA(pl.opts.path);
+	dll = LoadLibraryA(pl.opts.path.toStringz);
 	if (dll == null)
 	{
-		fprintf(stderr, "load_plugin: failed to open %s using LoadLibrary: %s\n",
+		writefln("load_plugin: failed to open %s using LoadLibrary: %s",
 			superbasename(pl.opts.path),
-			StrError(GetLastError()));
+			StrError(GetLastError()).fromStringz);
 		goto err;
 	}
 
 	get_header = cast(winampDSPGetHeaderType)GetProcAddress(dll, "winampDSPGetHeader2");
 	if (get_header == null)
 	{
-		fprintf(stderr, "load_plugin: failed to get winampDSPGetHeader2() from %s: %s\n",
+		writefln("load_plugin: failed to get winampDSPGetHeader2() from %s: %s",
 			superbasename(pl.opts.path),
-			StrError(GetLastError()));
+			StrError(GetLastError()).fromStringz);
 		goto err;
 	}
 
 	header = get_header();
 	if (header == null)
 	{
-		fprintf(stderr, "load_plugin: winampDSPGetHeader2() returned NULL!\n");
+		writefln("load_plugin: winampDSPGetHeader2() returned NULL!");
 		goto err;
 	}
 
@@ -356,11 +356,11 @@ bool load_plugin(Plugin* pl)
 	if (module_ == null)
 	{
 		if (pl.opts.module_idx != MODULE_IDX_DEFAULT)
-			fprintf(stderr, "load_plugin: %s has no module with index %d\n",
+			writefln("load_plugin: %s has no module with index %d",
 				superbasename(pl.opts.path),
 				pl.opts.module_idx);
 		else
-			fprintf(stderr, "load_plugin: %s has no module with index 0 or 1!\n",
+			writefln("load_plugin: %s has no module with index 0 or 1!",
 				superbasename(pl.opts.path));
 		goto err;
 	}
@@ -372,12 +372,12 @@ bool load_plugin(Plugin* pl)
 	init_rv = module_.Init(module_);
 	if (init_rv != 0)
 	{
-		fprintf(stderr, "load_plugin: Init() failed! (%d)\n", init_rv);
+		writefln("load_plugin: Init() failed! (%d)", init_rv);
 		goto err;
 	}
 
-	printf("%s: %s\n", superbasename(pl.opts.path), header.description);
-	printf("%s:%d: %s\n", superbasename(pl.opts.path), pl.opts.module_idx, module_.description);
+	writefln("%s: %s", superbasename(pl.opts.path), header.description.fromStringz);
+	writefln("%s:%d: %s", superbasename(pl.opts.path), pl.opts.module_idx, module_.description.fromStringz);
 
 	pl.module_ = module_;
 	pl.dll = dll;
@@ -408,7 +408,7 @@ bool match_string(string spec, string value) pure
  * 
  * if the format is supported, returns null
  */
-const(char)* plugin_supports_format(const(Plugin)* pl, const(Fmt)* fmt) pure
+string plugin_supports_format(const(Plugin)* pl, const(Fmt)* fmt) pure
 {
 	string ratestr;
 	string bitstr;

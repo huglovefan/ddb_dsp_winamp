@@ -7,6 +7,8 @@ import core.sys.windows.winbase;
 import core.sys.windows.windef;
 import core.sys.windows.winuser;
 
+import std.stdio : writefln;
+
 import ddw.pipedata;
 import ddw.host.buf;
 import ddw.host.fmt;
@@ -135,7 +137,7 @@ bool fmtchange(Plugin[] plugins, const(Fmt)* fmt)
 
 bool compat_update(Plugin* pl, const(Fmt)* fmt)
 {
-	const(char)* what;
+	string what;
 
 	what = plugin_supports_format(pl, fmt);
 	pl.skip = (what != null);
@@ -144,14 +146,14 @@ bool compat_update(Plugin* pl, const(Fmt)* fmt)
 	{
 		if (pl.opts.required)
 		{
-			fprintf(stderr, "error: required plugin %s doesn't support this %s, exiting\n",
+			writefln("error: required plugin %s doesn't support this %s, exiting",
 				superbasename(pl.opts.path),
 				what);
 
 			return false;
 		}
 
-		fprintf(stderr, "warning: disabling %s due to unsupported %s\n",
+		writefln("warning: disabling %s due to unsupported %s",
 			superbasename(pl.opts.path),
 			what);
 	}

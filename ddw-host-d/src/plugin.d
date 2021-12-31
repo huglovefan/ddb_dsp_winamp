@@ -34,7 +34,7 @@ struct PluginOpts
 	int may_stretch = 1;
 	int doconf = 1;
 	int required = 0;
-	char* path = null;
+	string path;
 
 	string rate;
 	string bits;
