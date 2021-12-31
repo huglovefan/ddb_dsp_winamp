@@ -8,45 +8,37 @@ import core.sys.windows.ntdef;
 import core.sys.windows.winbase;
 import core.sys.windows.windef;
 
-import std.string : fromStringz, toStringz;
-
-string superbasename(string path)
-{
-	return superbasename(path.toStringz).fromStringz;
-}
-
 nothrow:
 @nogc:
 
 extern (C) ssize_t write(int fd, const(void)*, size_t);
 extern (C) ssize_t read(int fd, void*, size_t);
 
-inout(char)* superbasename(return inout(char)* path_) pure
+string superbasename(string path)
 {
-	inout(char)* path = path_;
-	inout(char)* slash = null;
+	ssize_t lastslash = -1;
 
-	do
+	foreach (size_t i, char c; path)
 	{
-		if (*path == '/') slash = path;
-		if (*path == '\\') slash = path;
+		switch (c)
+		{
+			case '/':
+			case '\\':
+				lastslash = i;
+				break;
+			default:
+				break;
+		}
 	}
-	while (*path++);
 
-	return slash ? slash+1 : path_;
+	return lastslash != -1 ? path[lastslash+1..$] : path;
 }
 
-inout(char)* strchrnul(return inout(char)* s, char c) pure
+unittest
 {
-	while (*s && *s != c) s++;
-	return s;
-}
-
-bool atoi_ok(const(char)* s, int* outp)
-{
-	int scanned;
-	int rv = sscanf(s, "%d%n", outp, &scanned);
-	return rv == 1 && s[scanned] == '\0';
+	assert(superbasename("a") == "a");
+	assert(superbasename("a/b") == "b");
+	assert(superbasename("a\\b") == "b");
 }
 
 // success                 -> true
