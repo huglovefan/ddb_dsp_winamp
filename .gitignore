@@ -2,5 +2,6 @@
 *-test-library
 *.c
 *.exe
+*.obj
 *.so
 README

@@ -6,9 +6,12 @@ import core.stdc.string;
 import core.sys.windows.winbase;
 import core.sys.windows.windef;
 
-import std.algorithm.iteration : splitter;
-import std.algorithm.searching : canFind, startsWith;
+import std.array : split;
+import std.algorithm.iteration : filter, splitter;
+import std.algorithm.searching : canFind, endsWith, startsWith;
 import std.conv : ConvException, to;
+import std.file : exists;
+import std.process : environment;
 import std.stdio : writefln;
 import std.string : fromStringz, indexOf, toStringz;
 
@@ -104,8 +107,14 @@ bool parse_plugin_options(string s, PluginOpts* outp)
 	{
 		if (outp.path == null)
 		{
-			outp.path = part;
-			outp.dllname = superbasename(part);
+			string found = find_dll(part);
+			if (!found)
+			{
+				writefln("error: couldn't find dll \"%s\"", part);
+				goto err;
+			}
+			outp.path = found;
+			outp.dllname = superbasename(found);
 			apply_defaults(outp);
 			goto next;
 		}
@@ -302,6 +311,54 @@ unittest
 	assert(opts.rate == "8000,44100");
 	assert(opts.bits == "8,24");
 	assert(opts.ch == "1,2");
+}
+
+/**
+ * takes a dll path or name, returns a path to a dll that exists (or null)
+ * 
+ * if given just the name, the dll is searched for in some directories
+ * 
+ * the DDW_DLL_PATH environment variable should contain linux paths to dll
+ * search directories separated by a ":" (colon, same as linux $PATH)
+ */
+string find_dll(string path)
+{
+	version (unittest)
+		return path;
+
+	if (path.exists)
+		return path;
+
+	bool is_plain_name = (path == superbasename(path));
+	if (is_plain_name)
+	{
+		enum path_separator_for_linux_paths = ':';
+		string[] searchpath = environment.get("DDW_DLL_PATH").split(path_separator_for_linux_paths);
+
+		if (string winehomedir = environment.get("WINEHOMEDIR"))
+		{
+			searchpath ~= winehomedir~"/.local/lib/winamp";
+			searchpath ~= winehomedir~"/.local/lib";
+		}
+
+		foreach (dir; searchpath.filter!exists)
+		{
+			string candidate = dir~'/'~path;
+
+			if (candidate.exists)
+				return candidate;
+
+			if (!endsWith(candidate, ".dll"))
+			{
+				candidate ~= ".dll";
+
+				if (candidate.exists)
+					return candidate;
+			}
+		}
+	}
+
+	return null;
 }
 
 /**
