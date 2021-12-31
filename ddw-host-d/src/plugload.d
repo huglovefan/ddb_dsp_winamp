@@ -81,7 +81,7 @@ bool parse_plugin_options(string s, PluginOpts* outp)
 		Type type;
 		union Value
 		{
-			int* i;
+			bool* b;
 			uint* u;
 			string* D;
 		}
@@ -91,10 +91,10 @@ bool parse_plugin_options(string s, PluginOpts* outp)
 		{"pmf", Option.Type.OPT_UINT, {u: &outp.process_min_frames}},
 		{"pMf", Option.Type.OPT_UINT, {u: &outp.process_max_frames}},
 		{"pfm", Option.Type.OPT_UINT, {u: &outp.process_frames_mult}},
-		{"stretch", Option.Type.OPT_BOOL, {i: &outp.may_stretch}},
-		{"conf", Option.Type.OPT_BOOL, {i: &outp.doconf}},
-		{"required", Option.Type.OPT_BOOL, {i: &outp.required}},
-		{"trace", Option.Type.OPT_BOOL, {i: &outp.trace}},
+		{"stretch", Option.Type.OPT_BOOL, {b: &outp.may_stretch}},
+		{"conf", Option.Type.OPT_BOOL, {b: &outp.doconf}},
+		{"required", Option.Type.OPT_BOOL, {b: &outp.required}},
+		{"trace", Option.Type.OPT_BOOL, {b: &outp.trace}},
 		{"rate", Option.Type.OPT_DSTR, {D: &outp.rate}},
 		{"bits", Option.Type.OPT_DSTR, {D: &outp.bits}},
 		{"ch", Option.Type.OPT_DSTR, {D: &outp.ch}},
@@ -174,7 +174,7 @@ match:
 			case Option.Type.OPT_BOOL:
 				try
 				{
-					*opt.v.i = value.length > 0 ? value.to!int : 1;
+					*opt.v.b = value.length > 0 ? !!value.to!int : true;
 				}
 				catch (ConvException e)
 				{
@@ -182,7 +182,7 @@ match:
 					goto err;
 				}
 				if (prefixlen != 0 && name[0] == 'n') // negated // <-- won't this bug out when the real name start with n?
-					*opt.v.i = !*opt.v.i;
+					*opt.v.b = !*opt.v.b;
 				break;
 			case Option.Type.OPT_DSTR:
 				*opt.v.D = value;
@@ -229,7 +229,7 @@ match:
 					writefln("  %s=%u", opt.name, *opt.v.u);
 					break;
 				case Option.Type.OPT_BOOL:
-					writefln("  %s=%d", opt.name, *opt.v.i);
+					writefln("  %s=%s", opt.name, *opt.v.b);
 					break;
 				case Option.Type.OPT_DSTR:
 					writefln("  %s=\"%s\"", opt.name, *opt.v.D);

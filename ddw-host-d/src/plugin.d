@@ -25,15 +25,15 @@ enum MODULE_IDX_DEFAULT = -1;
 
 struct PluginOpts
 {
-	int trace = 0;
+	bool trace = false;
 
 	int module_idx = MODULE_IDX_DEFAULT;
 	uint process_min_frames = 576;
 	uint process_max_frames = 576;
 	uint process_frames_mult = 576;
-	int may_stretch = 1;
-	int doconf = 1;
-	int required = 0;
+	bool may_stretch = true;
+	bool doconf = true;
+	bool required = false;
 	string path;
 
 	string rate;
