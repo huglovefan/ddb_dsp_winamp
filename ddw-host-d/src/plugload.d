@@ -26,11 +26,9 @@ import ddw.host.winamp;
  * 
  * these can be overwritten by values specified on the command line
  */
-void apply_defaults(string path, PluginOpts* outp)
+void apply_defaults(PluginOpts* outp)
 {
-	string dllname = superbasename(path);
-
-	switch (dllname)
+	switch (outp.dllname)
 	{
 		case "dsp_centercut.dll":
 			outp.doconf = 0;
@@ -107,7 +105,8 @@ bool parse_plugin_options(string s, PluginOpts* outp)
 		if (outp.path == null)
 		{
 			outp.path = part;
-			apply_defaults(part, outp);
+			outp.dllname = superbasename(part);
+			apply_defaults(outp);
 			goto next;
 		}
 
@@ -218,7 +217,7 @@ match:
 
 	debug (printParsedOptions)
 	{
-		writefln("%s:", superbasename(outp.path).fromStringz);
+		writefln("%s:", outp.dllname);
 		writefln("  module_idx=%d", outp.module_idx);
 
 		foreach (ref opt; options)
@@ -320,7 +319,7 @@ bool load_plugin(Plugin* pl)
 	if (dll == null)
 	{
 		writefln("load_plugin: failed to open %s using LoadLibrary: %s",
-			superbasename(pl.opts.path),
+			pl.opts.dllname,
 			StrError(GetLastError()).fromStringz);
 		goto err;
 	}
@@ -329,7 +328,7 @@ bool load_plugin(Plugin* pl)
 	if (get_header == null)
 	{
 		writefln("load_plugin: failed to get winampDSPGetHeader2() from %s: %s",
-			superbasename(pl.opts.path),
+			pl.opts.dllname,
 			StrError(GetLastError()).fromStringz);
 		goto err;
 	}
@@ -357,11 +356,11 @@ bool load_plugin(Plugin* pl)
 	{
 		if (pl.opts.module_idx != MODULE_IDX_DEFAULT)
 			writefln("load_plugin: %s has no module with index %d",
-				superbasename(pl.opts.path),
+				pl.opts.dllname,
 				pl.opts.module_idx);
 		else
 			writefln("load_plugin: %s has no module with index 0 or 1!",
-				superbasename(pl.opts.path));
+				pl.opts.dllname);
 		goto err;
 	}
 
@@ -376,8 +375,8 @@ bool load_plugin(Plugin* pl)
 		goto err;
 	}
 
-	writefln("%s: %s", superbasename(pl.opts.path), header.description.fromStringz);
-	writefln("%s:%d: %s", superbasename(pl.opts.path), pl.opts.module_idx, module_.description.fromStringz);
+	writefln("%s: %s", pl.opts.dllname, header.description.fromStringz);
+	writefln("%s:%d: %s", pl.opts.dllname, pl.opts.module_idx, module_.description.fromStringz);
 
 	pl.module_ = module_;
 	pl.dll = dll;

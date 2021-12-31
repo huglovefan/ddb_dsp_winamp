@@ -191,14 +191,14 @@ bool compat_update(Plugin* pl, const(Fmt)* fmt)
 		if (pl.opts.required)
 		{
 			writefln("error: required plugin %s doesn't support this %s, exiting",
-				superbasename(pl.opts.path),
+				pl.opts.dllname,
 				what);
 
 			return false;
 		}
 
 		writefln("warning: disabling %s due to unsupported %s",
-			superbasename(pl.opts.path),
+			pl.opts.dllname,
 			what);
 	}
 

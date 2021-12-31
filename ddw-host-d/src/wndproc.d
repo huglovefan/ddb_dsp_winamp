@@ -27,7 +27,7 @@ string get_lastplug()
 	Plugin* pl = cast(Plugin*)procplug.atomicLoad();
 
 	if (pl != null)
-		return superbasename(pl.opts.path);
+		return pl.opts.dllname;
 	else
 		return "?";
 }

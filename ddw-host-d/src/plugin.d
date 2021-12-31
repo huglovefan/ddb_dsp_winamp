@@ -34,7 +34,9 @@ struct PluginOpts
 	bool may_stretch = true;
 	bool doconf = true;
 	bool required = false;
+
 	string path;
+	string dllname;
 
 	string rate;
 	string bits;
