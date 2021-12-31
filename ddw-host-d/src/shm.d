@@ -6,18 +6,17 @@ import core.sys.windows.winbase;
 import core.sys.windows.windef;
 import core.sys.windows.ntdef;
 
+import std.string : toStringz;
+
 import ddw.host.misc;
 
-nothrow:
-@nogc:
-
-void* shmnew(const(char)* path, size_t sz)
+void* shmnew(string path, size_t sz)
 {
 	//
 	// open the file in Z:\dev\shm
 	//
 	HANDLE File = CreateFileA(
-		path,
+		path.toStringz,
 		GENERIC_READ|GENERIC_WRITE,
 		FILE_SHARE_READ|FILE_SHARE_WRITE,
 		null,

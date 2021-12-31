@@ -7,6 +7,7 @@ import core.sys.windows.winbase;
 import core.sys.windows.windef;
 import core.sys.windows.winuser;
 
+import std.process : environment;
 import std.stdio : writefln;
 import std.string : toStringz;
 
@@ -164,9 +165,9 @@ extern (C) int _Dmain(string[] args)
 	//
 	// open shm file
 	//
-	if (getenv("DDW_SHM_NAME") != null)
+	if (string shmpath = environment.get("DDW_SHM_NAME"))
 	{
-		globals.shm = cast(Shm*)shmnew(getenv("DDW_SHM_NAME"), Shm.sizeof);
+		globals.shm = cast(Shm*)shmnew(shmpath, Shm.sizeof);
 		if (globals.shm == null)
 			writefln("warning: shm open failed");
 	}
