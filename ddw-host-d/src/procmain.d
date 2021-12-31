@@ -8,10 +8,11 @@ import core.sys.windows.winbase;
 import core.sys.windows.windef;
 import core.sys.windows.winuser;
 
+import core.atomic;
 import core.thread.osthread : rt_moduleTlsCtor, rt_moduleTlsDtor, thread_attachThis;
 import core.thread.threadbase : thread_detachThis;
 
-import std.stdio : writefln;
+import std.stdio : writefln, writeln;
 
 import ddw.pipedata;
 import ddw.host.buf;
@@ -24,6 +25,9 @@ import ddw.host.plugproc;
 
 extern (Windows) uint process_thread_main(void* ud)
 {
+	try
+	{ // ---
+
 	Buf data;
 	Buf tmp;
 	Fmt lastfmt;
@@ -117,6 +121,23 @@ readerr:
 	else
 		writefln("read: unexpected EOF");
 	goto err;
+
+	} // ---
+	catch (Throwable e)
+	{
+		Plugin* pl = cast(Plugin*)procplug.atomicLoad();
+		if (pl != null)
+			writefln("fatal error: %s threw during processing", pl.opts.dllname);
+		else
+			writefln("fatal error: uncaught exception in processing thread");
+		while (e)
+		{
+			writeln(e);
+			e = e.next;
+		}
+		TerminateProcess(GetCurrentProcess(), 1);
+		assert(0);
+	}
 }
 
 // -----------------------------------------------------------------------------
