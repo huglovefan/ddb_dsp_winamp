@@ -90,19 +90,19 @@ err:
 read1fail:
 	if (errno != 0)
 		goto readerr;
-	fprintf(stderr, "process thread got EOF\n");
+	writefln("process thread got EOF");
 	goto Lout;
 writeerr:
 	if (errno != 0)
 		perror("write");
 	else
-		fprintf(stderr, "write: unexpected EOF\n");
+		writefln("write: unexpected EOF");
 	goto err;
 readerr:
 	if (errno != 0)
 		perror("read");
 	else
-		fprintf(stderr, "read: unexpected EOF\n");
+		writefln("read: unexpected EOF");
 	goto err;
 }
 
@@ -118,7 +118,7 @@ private:
  */
 bool fmtchange(Plugin[] plugins, const(Fmt)* fmt)
 {
-	fprintf(stderr, "format change: rate=%d bps=%d ch=%d\n",
+	writefln("format change: rate=%s bps=%s ch=%s",
 		fmt.rate, fmt.bps, fmt.ch);
 
 	foreach (ref pl; plugins)

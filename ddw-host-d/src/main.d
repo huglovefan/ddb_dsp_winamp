@@ -153,7 +153,7 @@ extern (C) int _Dmain(string[] args)
 
 		if (nok)
 		{
-			fprintf(stderr, "error: fd shuffle failed\n");
+			writefln("error: fd shuffle failed");
 			goto err;
 		}
 
@@ -168,11 +168,11 @@ extern (C) int _Dmain(string[] args)
 	{
 		globals.shm = cast(Shm*)shmnew(getenv("DDW_SHM_NAME"), Shm.sizeof);
 		if (globals.shm == null)
-			fprintf(stderr, "warning: shm open failed\n");
+			writefln("warning: shm open failed");
 	}
 	else
 	{
-		fprintf(stderr, "warning: DDW_SHM_NAME not set\n");
+		writefln("warning: DDW_SHM_NAME not set");
 	}
 
 	//
@@ -230,7 +230,7 @@ extern (C) int _Dmain(string[] args)
 	}
 	if (globals.plugins.length == 0)
 	{
-		fprintf(stderr, "it works\n");
+		writefln("it works");
 		goto err;
 	}
 

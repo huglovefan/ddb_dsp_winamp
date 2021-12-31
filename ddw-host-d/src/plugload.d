@@ -243,14 +243,14 @@ match:
 
 	if (outp.process_min_frames % outp.process_frames_mult != 0)
 	{
-		fprintf(stderr, "error: process_min_frames %d is not a multiple of process_frames_mult %d\n",
+		writefln("error: process_min_frames %s is not a multiple of process_frames_mult %s",
 			outp.process_min_frames, outp.process_frames_mult);
 		goto err;
 	}
 
 	if (outp.process_max_frames % outp.process_frames_mult != 0)
 	{
-		fprintf(stderr, "error: process_max_frames %d is not a multiple of process_frames_mult %d\n",
+		writefln("error: process_max_frames %s is not a multiple of process_frames_mult %s",
 			outp.process_max_frames, outp.process_frames_mult);
 		goto err;
 	}
@@ -259,7 +259,7 @@ match:
 		outp.process_max_frames != 0 &&
 		outp.process_min_frames > outp.process_max_frames)
 	{
-		fprintf(stderr, "error: process_min_frames %d is greater than process_max_frames %d\n",
+		writefln("error: process_min_frames %s is greater than process_max_frames %s",
 			outp.process_min_frames, outp.process_max_frames);
 		goto err;
 	}
