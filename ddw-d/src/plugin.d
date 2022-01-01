@@ -1,40 +1,60 @@
 module ddw.plugin;
 
-import core.stdc.stdio;
+import core.stdc.stdio : snprintf;
 import core.stdc.stdlib;
 import core.stdc.string;
+import core.memory : GC;
+import core.runtime : rt_init, rt_term;
+import std.conv;
+import std.string;
+import std.stdio : _IOLBF, stdout, writefln, writeln;
 import ddw.child;
 import ddw.chldinit;
 import ddw.chldproc;
 import ddw.fmt;
 import ddw.zzx_deadbeef;
 
-enum
-{
-	NEED_32BIT = 0b01,
-	NEED_FLOAT = 0b10,
-};
-
-__gshared DB_functions_t* deadbeef;
-
-__gshared bool have_patch1 = false;
-
-//
-// placeholder value to represent an empty string in dspconfig (it can't store empty strings)
-//
-enum DSPCONFIG_EMPTY_STRING = "-";
-
-struct ddw2
+struct Ddw
 {
 	ddb_dsp_context_t ctx;
 	Child host;
-	char* dll;
+	string dll;
 	ushort max_bps;
+}
+
+__gshared DB_functions_t* deadbeef;
+
+bool ddw_has_dll(const(Ddw)* plugin)
+{
+	if (plugin.dll == "")
+		return false;
+
+	if (plugin.dll == DSPCONFIG_EMPTY_STRING)
+		return false;
+
+	if (isbitdepth(plugin.dll))
+		return false;
+
+	return true;
 }
 
 // -----------------------------------------------------------------------------
 
-int ddw_next_needs_conversion(ddw2* plugin, const(ddb_waveformat_t)* curfmt)
+private:
+
+enum
+{
+	NEED_32BIT = 0b0001,
+	NEED_FLOAT = 0b0010,
+}
+
+__gshared bool have_patch1 = false;
+
+enum DSPCONFIG_EMPTY_STRING = "-";
+
+// -----------------------------------------------------------------------------
+
+int ddw_next_needs_conversion(Ddw* plugin, const(ddb_waveformat_t)* curfmt)
 {
 	ddb_dsp_context_t* nextctx = plugin.ctx.next;
 	int rv = 0;
@@ -62,65 +82,29 @@ int ddw_next_needs_conversion(ddw2* plugin, const(ddb_waveformat_t)* curfmt)
 	return rv;
 }
 
-bool isbitdepth(const(char)* s)
+bool isbitdepth(string s)
 {
-	int l;
-
-	if (
-		s[l=0] != '\0' &&
-		s[l=1] != '\0' &&
-		s[l=2] != '\0')
+	switch (s)
 	{
-		return false;
-	}
-
-	switch (l)
-	{
-		case 0:
-			return false;
-		case 1:
-			return memcmp(s, "0".ptr, 1) == 0 ||
-				memcmp(s, "8".ptr, 1) == 0;
-		case 2:
-			return memcmp(s, "16".ptr, 2) == 0 ||
-				memcmp(s, "24".ptr, 2) == 0 ||
-				memcmp(s, "32".ptr, 2) == 0;
+		case "8":
+		case "16":
+		case "24":
+		case "32":
+			return true;
 		default:
-			assert(0);
+			return false;
 	}
-}
-
-bool ddw_has_dll(ddw2* plugin)
-{
-	if (plugin.dll[0] == '\0')
-		return false;
-
-	if (strcmp(plugin.dll, DSPCONFIG_EMPTY_STRING) == 0)
-		return false;
-
-	if (isbitdepth(plugin.dll))
-		return false;
-
-	return true;
 }
 
 // -----------------------------------------------------------------------------
 
 extern (C) ddb_dsp_context_t* dsp_winamp_open()
 {
-	ddw2* plugin;
-	char* dll;
-
-	plugin = cast(ddw2*)malloc(ddw2.sizeof);
-	dll = strdup("");
-	if (plugin == null || dll == null)
-		goto failed;
-
-	*plugin = ddw2.init;
+	Ddw* plugin = new Ddw;
 
 	// D bug: https://issues.dlang.org/show_bug.cgi?id=22624
 	// emergency initialization as .init is currently broken
-	memset(plugin, 0, ddw2.sizeof);
+	memset(plugin, 0, Ddw.sizeof);
 	plugin.host.pid = -1;
 	plugin.host.fds[0] = -1;
 	plugin.host.fds[1] = -1;
@@ -129,7 +113,6 @@ extern (C) ddb_dsp_context_t* dsp_winamp_open()
 	assert(plugin.host.fds[1] == -1);
 	assert(plugin.host.successes == 0);
 	assert(plugin.host.failures == 0);
-	assert(plugin.host.fatalerror == false);
 	assert(plugin.host.pl == null);
 	assert(plugin.dll == null);
 	assert(plugin.max_bps == 0);
@@ -138,94 +121,90 @@ extern (C) ddb_dsp_context_t* dsp_winamp_open()
 	plugin.ctx.plugin = cast(typeof(plugin.ctx.plugin))cast(void*)cast(DB_dsp_s*)&plugindef;
 	plugin.ctx.enabled = 1;
 
-	plugin.dll = dll;
 	plugin.max_bps = 16;
 	plugin.host.pl = plugin;
 
+	stdout.setvbuf(256, _IOLBF);
+
+	GC.addRoot(plugin);
 	static assert(plugin.ctx.offsetof == 0);
 	return &plugin.ctx;
-failed:
-	free(plugin);
-	free(dll);
-	return null;
 }
 
 extern (C) void dsp_winamp_close(ddb_dsp_context_t* ctx)
 {
-	ddw2* plugin = cast(ddw2*)ctx;
+	Ddw* plugin = cast(Ddw*)ctx;
 
 	child_stop(&plugin.host);
 
-	free(plugin.dll);
-	free(plugin);
+	GC.removeRoot(plugin);
 }
 
 extern (C) int dsp_winamp_process(
 	ddb_dsp_context_t* ctx,
 	float* samples,
-	int frames,
+	int frames_,
 	int maxframes,
 	ddb_waveformat_t* fmt,
 	float* ratio)
 {
-	ddb_waveformat_t nextfmt;
-	ddw2* plugin = cast(ddw2*)ctx;
-	size_t outcap;
-	const(int) frames_in = frames;
-	int convinfo;
+	Ddw* plugin = cast(Ddw*)ctx;
+	const(int) frames_in = frames_;
 
-	// guess the size in bytes of the output buffer
-	// note: the maxframes value assumes 32-bit samples even if fmt says
-	//  something else
-	// this should be correct as long another dsp hasn't changed the number
-	//  of channels
-	outcap = maxframes*(32/8)*fmt.channels;
+	const(size_t) outcap = maxframes*(32/8)*fmt.channels;
 
-	nextfmt = *fmt;
-	convinfo = ddw_next_needs_conversion(plugin, fmt);
-	if (convinfo&NEED_32BIT)
-		nextfmt.bps = 32;
-	if (convinfo&NEED_FLOAT)
-		nextfmt.is_float = 1;
+	const(ddb_waveformat_t) wantfmt = {
+		ddb_waveformat_t wantfmt = *fmt;
+		int convinfo = ddw_next_needs_conversion(plugin, fmt);
+		if (convinfo&NEED_32BIT)
+			wantfmt.bps = 32;
+		if (convinfo&NEED_FLOAT)
+			wantfmt.is_float = 1;
+		return wantfmt;
+	}();
 
-	frames = child_process_samples(&plugin.host,
-		fmt, &nextfmt,
-		cast(char*)samples, frames,
-		outcap);
-
-	if (frames == -1)
+	uint frames_out;
+	try
 	{
-		// stop playback if we're epically failing
+		frames_out = child_process_samples(&plugin.host,
+			fmt, &wantfmt,
+			cast(char*)samples, frames_in,
+			outcap);
+	}
+	catch (Exception e)
+	{
+		writeln(e);
+		child_record_failure(&plugin.host);
+		child_stop(&plugin.host);
+	}
+
+	if (frames_out == 0)
+	{
 		if (child_is_doomed(&plugin.host))
 		{
 			child_stop(&plugin.host);
+			child_reset_failures(&plugin.host);
 			deadbeef.log("dsp_winamp: plugin failed to start! check ~/.xsession-errors for errors or try running deadbeef from a terminal\n");
 			deadbeef.get_output().pause();
-			child_reset_failures(&plugin.host);
 		}
 	}
 
-	// nothing came out
-	if (frames <= 0)
+	if (frames_out == 0)
 	{
-		frames = 0;
-		*fmt = nextfmt;
+		*fmt = wantfmt;
 	}
 
-	assert(fmt_same(fmt, &nextfmt));
-	assert(fmt_frames2bytes(fmt, frames) <= outcap);
+	assert(*fmt == wantfmt);
+	assert(fmt_frames2bytes(fmt, frames_out) <= outcap);
 
-	if (frames > 0)
-		*ratio = (cast(float)frames_in)/(cast(float)frames);
+	if (frames_out > 0)
+		*ratio = (cast(float)frames_in)/(cast(float)frames_out);
 	else
 		*ratio = 0.0f;
 
-	return frames;
+	return frames_out;
 }
 
-//
-// called when playback is stopped or un-stopped
-//
 extern (C) void dsp_winamp_reset(ddb_dsp_context_t* ctx)
 {
 	have_patch1 = !!deadbeef.conf_get_int("ddw.patch1", 0);
@@ -251,44 +230,37 @@ extern (C) const(char)* dsp_winamp_get_param_name(int p)
 	}
 }
 
-extern (C) void dsp_winamp_set_param(ddb_dsp_context_t* ctx, int p, const(char)* val)
+extern (C) void dsp_winamp_set_param(ddb_dsp_context_t* ctx, int p, const(char)* val_)
 {
-	ddw2* plugin = cast(ddw2*)ctx;
+	Ddw* plugin = cast(Ddw*)ctx;
+	string val = cast(string)val_.fromStringz;
 	char* newdll;
 
-	if (strcmp(val, DSPCONFIG_EMPTY_STRING) == 0)
+	if (val == DSPCONFIG_EMPTY_STRING)
 		val = "";
 
-	//
-	// warn about too-long options
-	// when parsing options from dspconfig, they're read to a 100-byte
-	//  buffer so longer ones will get truncated (and also mess up later
-	//  options)
-	//
-	if (strlen(val) > 99)
+	if (val.length > 99)
 		deadbeef.log("dsp_winamp: warning: dsp options are limited to 99 characters\n");
 
 	switch (p)
 	{
 		case 0:
-			if (strcmp(val, plugin.dll) == 0)
-				break;
+			if (val != plugin.dll)
+			{
+				child_stop(&plugin.host);
+				child_reset_failures(&plugin.host);
 
-			newdll = strdup(val);
-			if (newdll == null)
-				break;
-
-			child_stop(&plugin.host);
-			child_reset_failures(&plugin.host);
-
-			free(plugin.dll);
-			plugin.dll = newdll;
-
+				plugin.dll = val.dup;
+			}
 			break;
 
 		case 1:
-			plugin.max_bps = cast(ushort)atoi(val);
-			if (!isbitdepth(val)) {
+			if (isbitdepth(val))
+			{
+				plugin.max_bps = val.to!ushort;
+			}
+			else
+			{
 				deadbeef.log("dsp_winamp: invalid bit depth entered\n");
 				plugin.max_bps = 16;
 			}
@@ -296,26 +268,27 @@ extern (C) void dsp_winamp_set_param(ddb_dsp_context_t* ctx, int p, const(char)*
 			break;
 
 		default:
-			// probably an earlier option was too long and messed up the rest
-			fprintf(stderr, "dsp_winamp: tried to set nonexistent option index %d to \"%s\"\n", p, val);
+			writefln("dsp_winamp: tried to set nonexistent option index %d to \"%s\"", p, val.toStringz);
 			break;
 	}
 }
 
 extern (C) void dsp_winamp_get_param(ddb_dsp_context_t* ctx, int p, char* str, int len)
 {
-	ddw2* plugin = cast(ddw2*)ctx;
+	Ddw* plugin = cast(Ddw*)ctx;
 
 	switch (p)
 	{
 		case 0:
-			snprintf(str, len, "%s", plugin.dll);
+			snprintf(str, len, "%s", plugin.dll.toStringz);
 			break;
+
 		case 1:
 			snprintf(str, len, "%u", plugin.max_bps);
 			break;
+
 		default:
-			fprintf(stderr, "dsp_winamp: tried to get nonexistent option index %d\n", p);
+			writefln("dsp_winamp: tried to get nonexistent option index %d", p);
 			str[0] = '\0';
 			break;
 	}
@@ -324,24 +297,31 @@ extern (C) void dsp_winamp_get_param(ddb_dsp_context_t* ctx, int p, char* str, i
 		snprintf(str, len, "%s", DSPCONFIG_EMPTY_STRING.ptr);
 }
 
-//
-// returns true if there's nothing for dsp_winamp_process() to do
-//
 extern (C) int dsp_winamp_can_bypass(ddb_dsp_context_t* ctx, ddb_waveformat_t* fmt)
 {
-	ddw2* plugin = cast(ddw2*)ctx;
+	Ddw* plugin = cast(Ddw*)ctx;
 	int convinfo;
 
-	// have some processing to do?
 	if (ddw_has_dll(plugin))
 		return false;
 
-	// need to convert for the next dsp?
 	convinfo = ddw_next_needs_conversion(plugin, fmt);
 	if (convinfo != 0)
 		return false;
 
 	return true;
+}
+
+extern (C) int dsp_winamp_start()
+{
+	rt_init();
+	return 0;
+}
+
+extern (C) int dsp_winamp_stop()
+{
+	rt_term();
+	return 0;
 }
 
 __gshared DB_dsp_t plugindef = {
@@ -356,6 +336,8 @@ __gshared DB_dsp_t plugindef = {
 		configdialog:
 			"property \"Host command\" entry ddw.host_cmd \"ddw_host.exe\";\n"~
 			"property \"DSP plugin can return non-32bit samples\" checkbox ddw.patch1 0;\n",
+		start: &dsp_winamp_start,
+		stop: &dsp_winamp_stop,
 	},
 	open: &dsp_winamp_open,
 	close: &dsp_winamp_close,

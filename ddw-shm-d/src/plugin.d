@@ -1,13 +1,12 @@
 module ddw.shm.plugin;
 
-import core.stdc.errno;
-import core.stdc.stdint;
 import core.stdc.stdio;
-import core.stdc.stdlib;
-import core.stdc.string;
-import core.sys.posix.stdlib;
 import core.sys.posix.unistd;
-
+import core.runtime : rt_init, rt_term;
+import std.exception;
+import std.process;
+import std.string;
+import misclib.druntime.threadinit;
 import ddw.shmdata;
 import ddw.shm.shm;
 import ddw.shm.tickmain;
@@ -16,12 +15,16 @@ import ddw.shm.zzx_deadbeef;
 __gshared DB_functions_t *deadbeef;
 __gshared Shm *shm;
 
-__gshared char[64] shmname = '\0';
-
 // -----------------------------------------------------------------------------
+
+private:
+
+__gshared string shmname;
 
 extern (C) int shm_message(uint32_t id, uintptr_t ctx, uint32_t p1, uint32_t p2)
 {
+	initForeignThread();
+
 	switch (id)
 	{
 		case DB_EV_SONGSTARTED:
@@ -86,43 +89,37 @@ extern (C) int shm_message(uint32_t id, uintptr_t ctx, uint32_t p1, uint32_t p2)
 
 extern (C) int shm_connect()
 {
-	snprintf(shmname.ptr, shmname.length, "/dev/shm/deadbeef.%d", getpid());
-
-	shm = cast(Shm*)shmnew(shmname.ptr, Shm.sizeof);
-	if (shm == null)
-		goto err;
-
-	setenv("DDW_SHM_NAME", shmname.ptr, 1);
-
-	if (!tickthread_init())
-		goto err;
-
+	initForeignThread();
+	shmname = format!"/dev/shm/deadbeef.%s"(getpid());
+	shm = cast(Shm*)shmnew(shmname, Shm.sizeof);
+	environment["DDW_SHM_NAME"] = shmname;
+	tickthread_init();
 	return 0;
-err:
-	shm_disconnect();
-
-	return -1;
 }
 
 extern (C) int shm_disconnect()
 {
+	initForeignThread();
 	tickthread_deinit();
-
-	if (shm != null)
-	{
-		shmfree(shm, Shm.sizeof);
-		shm = null;
-	}
-
-	if (unlink(shmname.ptr) == -1 && errno != ENOENT)
-		perror("ddb_shm: unlink");
-
-	unsetenv("DDW_SHM_NAME");
-
+	shmfree(shm, Shm.sizeof);
+	errnoEnforce(unlink(shmname.ptr) == 0);
+	environment.remove("DDW_SHM_NAME");
 	return 0;
 }
 
-static DB_misc_t plugin = {
+extern (C) int shm_start()
+{
+	rt_init();
+	return 0;
+}
+
+extern (C) int shm_stop()
+{
+	rt_term();
+	return 0;
+}
+
+__gshared DB_misc_t plugin = {
 	plugin: {
 		api_vmajor: 1,
 		api_vminor: /* DDB_API_LEVEL */ 10,
@@ -131,11 +128,11 @@ static DB_misc_t plugin = {
 		version_minor: 0,
 		id: "shm",
 		name: "Shared Memory",
-		descr: "Maintains a shared memory file in /dev/shm",
-		copyright: "human",
 		message: &shm_message,
 		connect: &shm_connect,
 		disconnect: &shm_disconnect,
+		start: &shm_start,
+		stop: &shm_stop,
 	},
 };
 

@@ -14,7 +14,5 @@ struct Child
 	int successes;
 	int failures;
 
-	bool fatalerror;
-
-	ddw2* pl;
+	Ddw* pl;
 }

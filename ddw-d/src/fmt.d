@@ -8,14 +8,14 @@ size_t fmt_frame_size(const(ddb_waveformat_t)* fmt)
 	return fmt.channels*(fmt.bps>>3);
 }
 
-size_t fmt_frames2bytes(const(ddb_waveformat_t)* fmt, int frames)
+size_t fmt_frames2bytes(const(ddb_waveformat_t)* fmt, uint frames)
 {
 	return frames*fmt_frame_size(fmt);
 }
 
-size_t fmt_bytes2frames(const(ddb_waveformat_t)* fmt, int frames)
+uint fmt_bytes2frames(const(ddb_waveformat_t)* fmt, size_t frames)
 {
-	return frames/fmt_frame_size(fmt);
+	return cast(uint)(frames/fmt_frame_size(fmt));
 }
 
 void fmt_assert_reasonable(const(ddb_waveformat_t)* fmt)
