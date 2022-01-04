@@ -166,6 +166,9 @@ extern (C) int dsp_winamp_process(
 		plugoutbuf = child_process_samples(&plugin.host,
 			inbuf, fmt,
 			outbuf, &wantfmt);
+
+		assert(plugoutbuf.ptr == outbuf.ptr);
+		assert(plugoutbuf.length <= outbuf.length);
 	}
 	catch (Exception e)
 	{
@@ -173,9 +176,6 @@ extern (C) int dsp_winamp_process(
 		child_record_failure(&plugin.host);
 		child_stop(&plugin.host);
 	}
-
-	assert(plugoutbuf.ptr == outbuf.ptr);
-	assert(plugoutbuf.length <= outbuf.length);
 
 	uint frames_out = fmt_bytes2frames(&wantfmt, plugoutbuf.length);
 
