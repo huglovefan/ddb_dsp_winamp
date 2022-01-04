@@ -250,19 +250,6 @@ void[] pcm_convert_s(
 	return outbuf[0..outbufreq];
 }
 
-void pcm_convert_s(
-	const(ddb_waveformat_t)* infmt,
-	const(char)* inbuf,
-	int in_frames,
-	const(ddb_waveformat_t)* outfmt,
-	char* outbuf,
-	size_t outbufcap)
-{
-	pcm_convert_s(
-		inbuf[0..fmt_frames2bytes(infmt, in_frames)], infmt,
-		outbuf[0..outbufcap], outfmt);
-}
-
 version (unittest)
 {
 	__gshared size_t acnt = 0;
