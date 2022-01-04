@@ -324,7 +324,10 @@ unittest
 string find_dll(string path)
 {
 	version (unittest)
-		return path;
+	{
+		if (path.ptr == path.ptr) // suppress unreachable code warning
+			return path;
+	}
 
 	if (path.exists)
 		return path;
