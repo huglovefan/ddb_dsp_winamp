@@ -76,7 +76,7 @@ extern (C) void* tickthread_main(void* ud)
 		final switch (rv)
 		{
 			case -1:
-				if (rv == EINTR)
+				if (errno == EINTR)
 					continue;
 				errnoEnforce(0);
 				break;
