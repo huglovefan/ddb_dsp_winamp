@@ -226,28 +226,38 @@ void pcm_convert_s(
 		{
 			size_t mark1fit = min(8, outbufreq);
 			mark1at = convbuf[0..mark1fit];
-			mark1at[0..mark1fit] = cast(char[])mark1[0..mark1fit];
+			mark1at[] = cast(char[])mark1[0..mark1fit];
 		}
 
 		if (outbufreq > 8)
 		{
 			size_t mark2fit = min(8, outbufreq-8);
 			mark2at = convbuf[8..8+mark2fit];
-			mark2at[0..mark2fit] = cast(char[])mark2[0..mark2fit];
+			mark2at[] = cast(char[])mark2[0..mark2fit];
 		}
 
-		if (outbuf.length > outbufreq)
+		if (convbuf.length > outbufreq)
 		{
-			size_t mark3fit = min(8, outbuf.length-outbufreq);
+			size_t mark3fit = min(8, convbuf.length-outbufreq);
 			mark3at = convbuf[outbufreq..outbufreq+mark3fit];
-			mark3at[0..mark3fit] = cast(char[])mark3[0..mark3fit];
+			mark3at[] = cast(char[])mark3[0..mark3fit];
 		}
 	}
 
-	deadbeef.pcm_convert(
-		infmt, cast(char*)inbuf.ptr,
-		outfmt, cast(char*)convbuf.ptr,
-		cast(int)inbuf.length);
+	version (unittest)
+	{
+		unittest_pcm_convert(
+			infmt, cast(char*)inbuf.ptr,
+			outfmt, cast(char*)convbuf.ptr,
+			cast(int)inbuf.length);
+	}
+	else
+	{
+		deadbeef.pcm_convert(
+			infmt, cast(char*)inbuf.ptr,
+			outfmt, cast(char*)convbuf.ptr,
+			cast(int)inbuf.length);
+	}
 
 	assert(mark1at.ptr != null && mark1at != mark1[0..mark1at.length]);
 	assert(mark2at.ptr == null || mark2at != mark2[0..mark2at.length]);
@@ -256,7 +266,7 @@ void pcm_convert_s(
 	// if conversion was done to a temporary buffer, copy it to the output
 	if (convbuf.ptr != outbuf.ptr)
 	{
-		outbuf[0..convbuf.length] = convbuf[0..convbuf.length];
+		outbuf[0..outbufreq] = convbuf[0..outbufreq];
 	}
 }
 
@@ -271,4 +281,102 @@ void pcm_convert_s(
 	pcm_convert_s(
 		inbuf[0..fmt_frames2bytes(infmt, in_frames)], infmt,
 		outbuf[0..outbufcap], outfmt);
+}
+
+version (unittest)
+{
+	__gshared size_t acnt = 0;
+	__gshared size_t bcnt = 0;
+
+	int unittest_pcm_convert(
+		const(ddb_waveformat_t)* inputfmt,
+		const(char)* input,
+		const(ddb_waveformat_t)* outputfmt,
+		char* output,
+		int inputsize)
+	{
+		uint inframes = inputsize / (inputfmt.channels*(inputfmt.bps/8));
+		size_t outbufsz = cast(ulong)inframes * (outputfmt.channels*(outputfmt.bps/8));
+
+		acnt = 0;
+		foreach (i; 0..inputsize)
+		{
+			if (input[i] == 'a') acnt++;
+		}
+
+		output[0..outbufsz] = 'b';
+		bcnt = outbufsz;
+
+		return 0;
+	}
+}
+
+unittest
+{
+	import core.exception;
+	import std.exception;
+
+	enum channels = 2;
+	foreach (nframes; [1, 7, 15, 20])
+	foreach (bps1; [8, 16, 24, 32])
+	foreach (bps2; [8, 16, 24, 32])
+	foreach (markspace; [0, 6, 8])
+	foreach (samebuf; [false, true])
+	{
+		ubyte[] buf1 = new ubyte[nframes*channels*(bps1/8)];
+		ubyte[] buf2 = !samebuf ? new ubyte[markspace + nframes*channels*(bps2/8)] : buf1;
+		ddb_waveformat_t fmt1 = {
+			bps: bps1,
+			channels: channels,
+			samplerate: 44100,
+			channelmask: 0b11,
+			is_float: 0,
+			is_bigendian: 0,
+		};
+		ddb_waveformat_t fmt2 = {
+			bps: bps2,
+			channels: channels,
+			samplerate: 44100,
+			channelmask: 0b11,
+			is_float: 0,
+			is_bigendian: 0,
+		};
+
+		if (samebuf && bps2 > bps1)
+		{
+			assertThrown!AssertError(pcm_convert_s(
+				cast(void[])buf1, &fmt1,
+				cast(void[])buf2, &fmt2));
+
+			continue;
+		}
+		else
+		{
+			buf1[] = 'a';
+			if (!samebuf) buf2[] = 'x';
+			acnt = 0;
+			bcnt = 0;
+
+			pcm_convert_s(
+				cast(void[])buf1, &fmt1,
+				cast(void[])buf2, &fmt2);
+
+			if (bps1 != bps2)
+			{
+				assert(acnt == buf1.length);
+				assert(bcnt == nframes*channels*(bps2/8));
+				size_t checkbcnt = 0;
+				foreach (i; 0..bcnt)
+				{
+					if (buf2[i] == 'b') checkbcnt++;
+				}
+				assert(checkbcnt == bcnt);
+			}
+			else
+			{
+				assert(acnt == 0);
+				assert(bcnt == 0);
+			}
+		}
+	}
 }
