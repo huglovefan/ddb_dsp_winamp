@@ -82,22 +82,14 @@ void do_write(
 		bitspersample: cast(uint8_t)curfmt.bps,
 		channels: cast(uint8_t)curfmt.channels,
 	};
-	write_req_and_data(self, &request, writebuf);
-}
-
-void write_req_and_data(
-	Child* self,
-	const(processing_request*) request,
-	const(void[]) data)
-{
 	iovec[2] iov = [
 		{
-			iov_base: cast(void*)request,
-			iov_len: (*request).sizeof,
+			iov_base: cast(void*)&request,
+			iov_len: request.sizeof,
 		},
 		{
-			iov_base: cast(void*)data.ptr,
-			iov_len: request.buffer_size,
+			iov_base: cast(void*)writebuf.ptr,
+			iov_len: writebuf.length,
 		},
 	];
 	errnoEnforce(writev(self.fds[1], iov.ptr, iov.length) == iov[0].iov_len+iov[1].iov_len);
