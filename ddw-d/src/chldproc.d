@@ -1,14 +1,11 @@
 module ddw.chldproc;
 
-import core.stdc.errno;
-import core.stdc.stdlib;
-import core.stdc.string;
+import core.stdc.stdint;
 import core.sys.posix.sys.uio;
 
 import std.algorithm : min;
 import std.conv;
 import std.exception;
-import std.stdio;
 
 import ddw.pipedata;
 import ddw.child;
@@ -101,8 +98,8 @@ void do_write(
 	processing_request request = {
 		buffer_size: fmt_frames2bytes(fmt, frames),
 		samplerate: fmt.samplerate,
-		bitspersample: fmt.bps.to!ubyte,
-		channels: fmt.channels.to!ubyte,
+		bitspersample: fmt.bps.to!uint8_t,
+		channels: fmt.channels.to!uint8_t,
 	};
 	write_req_and_data(self, &request, writebuf);
 }
@@ -167,6 +164,101 @@ uint do_read(
 // source: https://www.random.org/bytes/
 static immutable char[8] mark1 = [0x8f, 0xad, 0xb2, 0xe9, 0xcd, 0x17, 0xec, 0xda];
 static immutable char[8] mark2 = [0x1c, 0xd3, 0x96, 0xe0, 0x0c, 0xd2, 0x42, 0xac];
+static immutable char[8] mark3 = ['D',  'e',  'a',  'D',  'B',  'e',  'e',  'F',];
+
+void pcm_convert_s(
+	const(void[]) inbuf,
+	const(ddb_waveformat_t)* infmt,
+	void[] outbuf,
+	const(ddb_waveformat_t)* outfmt)
+{
+	const(uint) nframes_in = fmt_bytes2frames(infmt, inbuf.length);
+
+	const(size_t) outbufreq = fmt_frames2bytes(outfmt, nframes_in);
+
+	// check input size (deadbeef api takes this as a signed int)
+	assert(inbuf.length <= int.max);
+
+	// check output buffer size
+	assert(outbuf.length >= outbufreq);
+
+	// check format sanity
+	assert(fmt_is_reasonable(infmt));
+	assert(fmt_is_reasonable(outfmt));
+
+	// check properties that can't be converted here
+	assert(outfmt.samplerate == infmt.samplerate);
+	assert(outfmt.is_bigendian == infmt.is_bigendian);
+
+	// nothing to do?
+	if (nframes_in == 0)
+	{
+		return;
+	}
+
+	// are all convertible properties the same already?
+	if (
+		outfmt.bps == infmt.bps &&
+		outfmt.is_float == infmt.is_float &&
+		outfmt.channels == infmt.channels &&
+		outfmt.channelmask == infmt.channelmask)
+	 {
+		if (outbuf.ptr != inbuf.ptr)
+		{
+			outbuf[0..inbuf.length] = inbuf[0..inbuf.length];
+		}
+
+		return;
+	}
+
+	void[] convbuf = outbuf;
+
+	// if output and input buffers are the same, we need a temporary buffer to hold the result
+	if (outbuf.ptr == inbuf.ptr)
+	{
+		convbuf = new void[outbufreq+8];
+	}
+
+	void[] mark1at;
+	void[] mark2at;
+	void[] mark3at;
+	{
+		{
+			size_t mark1fit = min(8, outbufreq);
+			mark1at = convbuf[0..mark1fit];
+			mark1at[0..mark1fit] = cast(char[])mark1[0..mark1fit];
+		}
+
+		if (outbufreq > 8)
+		{
+			size_t mark2fit = min(8, outbufreq-8);
+			mark2at = convbuf[8..8+mark2fit];
+			mark2at[0..mark2fit] = cast(char[])mark2[0..mark2fit];
+		}
+
+		if (outbuf.length > outbufreq)
+		{
+			size_t mark3fit = min(8, outbuf.length-outbufreq);
+			mark3at = convbuf[outbufreq..outbufreq+mark3fit];
+			mark3at[0..mark3fit] = cast(char[])mark3[0..mark3fit];
+		}
+	}
+
+	deadbeef.pcm_convert(
+		infmt, cast(char*)inbuf.ptr,
+		outfmt, cast(char*)convbuf.ptr,
+		cast(int)inbuf.length);
+
+	assert(mark1at.ptr != null && mark1at != mark1[0..mark1at.length]);
+	assert(mark2at.ptr == null || mark2at != mark2[0..mark2at.length]);
+	assert(mark3at.ptr == null || mark3at == mark3[0..mark3at.length]);
+
+	// if conversion was done to a temporary buffer, copy it to the output
+	if (convbuf.ptr != outbuf.ptr)
+	{
+		outbuf[0..convbuf.length] = convbuf[0..convbuf.length];
+	}
+}
 
 void pcm_convert_s(
 	const(ddb_waveformat_t)* infmt,
@@ -176,66 +268,7 @@ void pcm_convert_s(
 	char* outbuf,
 	size_t outbufcap)
 {
-	const(size_t) inbufsz = fmt_frames2bytes(infmt, in_frames);
-	const(size_t) outbufreq = fmt_frames2bytes(outfmt, in_frames);
-
-	char[] convbuf = outbuf[0..outbufcap];
-
-	char[] mark1at;
-	char[] mark2at;
-
-	if (in_frames == 0)
-		return;
-
-	fmt_assert_reasonable(infmt);
-	fmt_assert_reasonable(outfmt);
-
-	assert(outbufcap >= outbufreq);
-
-	assert(outfmt.samplerate == infmt.samplerate);
-	assert(outfmt.is_bigendian == infmt.is_bigendian);
-
-	if (
-		outfmt.bps == infmt.bps &&
-		outfmt.is_float == infmt.is_float &&
-		outfmt.channels == infmt.channels &&
-		outfmt.channelmask == infmt.channelmask)
-	 {
-		if (outbuf != inbuf)
-			memcpy(outbuf, inbuf, inbufsz);
-
-		return;
-	}
-
-	if (outbuf == inbuf)
-	{
-		convbuf = new char[outbufreq+mark2.sizeof];
-	}
-
-	{
-		size_t mark1sz = min(outbufreq, mark1.sizeof);
-		char* mark1pos = convbuf.ptr+outbufreq-mark1sz;
-		mark1pos[0..mark1sz] = mark1[0..mark1sz];
-		mark1at = mark1pos[0..mark1sz];
-	}
-
-	if (outbufcap > outbufreq)
-	{
-		size_t mark2sz = min(outbufcap-outbufreq, mark2.sizeof);
-		char* mark2pos = convbuf.ptr+outbufreq;
-		mark2pos[0..mark2sz] = mark2[0..mark2sz];
-		mark2at = mark2pos[0..mark2sz];
-	}
-
-	deadbeef.pcm_convert(
-		infmt, inbuf,
-		outfmt, convbuf.ptr,
-		cast(int)inbufsz);
-
-	assert(mark1at != mark1[0..mark1at.length]);
-	if (mark2at != null)
-		assert(mark2at == mark2[0..mark2at.length]);
-
-	if (convbuf.ptr != outbuf)
-		memcpy(outbuf, convbuf.ptr, outbufreq);
+	pcm_convert_s(
+		inbuf[0..fmt_frames2bytes(infmt, in_frames)], infmt,
+		outbuf[0..outbufcap], outfmt);
 }
