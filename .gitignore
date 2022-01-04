@@ -5,3 +5,4 @@
 *.obj
 *.so
 README
+core.[0-9]*
