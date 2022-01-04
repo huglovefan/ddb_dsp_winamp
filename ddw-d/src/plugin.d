@@ -142,34 +142,30 @@ extern (C) void dsp_winamp_close(ddb_dsp_context_t* ctx)
 
 extern (C) int dsp_winamp_process(
 	ddb_dsp_context_t* ctx,
-	float* samples,
-	int frames_,
+	float* samples_,
+	int frames_in,
 	int maxframes,
 	ddb_waveformat_t* fmt,
 	float* ratio)
 {
 	Ddw* plugin = cast(Ddw*)ctx;
-	const(int) frames_in = frames_;
 
-	const(size_t) outcap = maxframes*(32/8)*fmt.channels;
+	const(void[]) inbuf = (cast(void*)samples_)[0..fmt_frames2bytes(fmt, frames_in)];
+	void[] outbuf = (cast(void*)samples_)[0..(maxframes*(32/8)*fmt.channels)];
 
-	const(ddb_waveformat_t) wantfmt = {
-		ddb_waveformat_t wantfmt = *fmt;
-		int convinfo = ddw_next_needs_conversion(plugin, fmt);
-		if (convinfo&NEED_32BIT)
-			wantfmt.bps = 32;
-		if (convinfo&NEED_FLOAT)
-			wantfmt.is_float = 1;
-		return wantfmt;
-	}();
+	ddb_waveformat_t wantfmt = *fmt;
+	int convinfo = ddw_next_needs_conversion(plugin, fmt);
+	if (convinfo&NEED_32BIT)
+		wantfmt.bps = 32;
+	if (convinfo&NEED_FLOAT)
+		wantfmt.is_float = 1;
 
-	uint frames_out;
+	void[] plugoutbuf;
 	try
 	{
-		frames_out = child_process_samples(&plugin.host,
-			fmt, &wantfmt,
-			cast(char*)samples, frames_in,
-			outcap);
+		plugoutbuf = child_process_samples(&plugin.host,
+			inbuf, fmt,
+			outbuf, &wantfmt);
 	}
 	catch (Exception e)
 	{
@@ -177,6 +173,11 @@ extern (C) int dsp_winamp_process(
 		child_record_failure(&plugin.host);
 		child_stop(&plugin.host);
 	}
+
+	assert(plugoutbuf.ptr == outbuf.ptr);
+	assert(plugoutbuf.length <= outbuf.length);
+
+	uint frames_out = fmt_bytes2frames(&wantfmt, plugoutbuf.length);
 
 	if (frames_out == 0)
 	{
@@ -189,20 +190,14 @@ extern (C) int dsp_winamp_process(
 		}
 	}
 
-	if (frames_out == 0)
-	{
-		*fmt = wantfmt;
-	}
-
-	assert(*fmt == wantfmt);
-	assert(fmt_frames2bytes(fmt, frames_out) <= outcap);
+	*fmt = wantfmt;
 
 	if (frames_out > 0)
-		*ratio = (cast(float)frames_in)/(cast(float)frames_out);
+		*ratio = cast(float)frames_in / cast(float)frames_out;
 	else
-		*ratio = 0.0f;
+		*ratio = 0.0;
 
-	return frames_out;
+	return cast(int)frames_out;
 }
 
 extern (C) void dsp_winamp_reset(ddb_dsp_context_t* ctx)

@@ -15,99 +15,80 @@ import ddw.misc;
 import ddw.plugin;
 import ddw.zzx_deadbeef;
 
-uint child_process_samples(
+void[] child_process_samples(
 	Child* self,
-	ddb_waveformat_t* fmt,
-	const(ddb_waveformat_t)* wantfmt,
-	char* data,
-	uint frames_in,
-	size_t datacap)
+	const(void[]) inbuf,
+	const(ddb_waveformat_t*) infmt,
+	void[] outbuf,
+	const(ddb_waveformat_t*) wantfmt)
 {
 	if (self.pid == -1)
 	{
 		if (!ddw_has_dll(self.pl))
 		{
-			return just_convert(self, fmt, wantfmt, data, frames_in, datacap);
+			return pcm_convert_s(
+				inbuf, infmt,
+				outbuf, wantfmt);
 		}
 
 		child_start(self);
 	}
 
-	do_write(self, fmt, data, frames_in);
-	return do_read(self, fmt, wantfmt, data, datacap);
+	ddb_waveformat_t tmpfmt = *infmt;
+	do_write(self, &tmpfmt, inbuf);
+	return do_read(self, &tmpfmt, wantfmt, outbuf);
 }
 
 // -----------------------------------------------------------------------------
 
 private:
 
-uint just_convert(
-	Child* self,
-	ddb_waveformat_t* fmt,
-	const(ddb_waveformat_t)* nextfmt,
-	char* data,
-	uint frames,
-	size_t datacap)
-{
-	if (*fmt != *nextfmt)
-	{
-		pcm_convert_s(
-			fmt, data, frames,
-			nextfmt, data, datacap);
-
-		*fmt = *nextfmt;
-	}
-
-	return frames;
-}
-
 void do_write(
 	Child* self,
-	ddb_waveformat_t* fmt,
-	char* data,
-	int frames)
+	ddb_waveformat_t* curfmt,
+	const(void[]) inbuf)
 {
-	const(char)* writebuf;
+	const(void)[] writebuf;
 
 	bool bps_over = false;
-	if (self.pl.max_bps != 0 && fmt.bps > self.pl.max_bps)
+	if (self.pl.max_bps != 0 && curfmt.bps > self.pl.max_bps)
 		bps_over = true;
 
-	if (fmt.is_float || bps_over)
+	if (curfmt.is_float || bps_over)
 	{
-		ddb_waveformat_t convfmt = *fmt;
-		convfmt.bps = (bps_over) ? self.pl.max_bps : fmt.bps;
+		ddb_waveformat_t convfmt = *curfmt;
+		convfmt.bps = (bps_over) ? self.pl.max_bps : curfmt.bps;
 		convfmt.is_float = 0;
 
-		char[] convbuf = new char[fmt_frames2bytes(&convfmt, frames)+8];
+		uint frames = fmt_bytes2frames(curfmt, inbuf.length);
+		size_t convbytes = fmt_frames2bytes(&convfmt, frames);
+		void[] convbuf = new void[convbytes+8];
 
-		pcm_convert_s(
-		    fmt, data, frames,
-		    &convfmt, convbuf.ptr, convbuf.length);
+		writebuf = pcm_convert_s(
+			inbuf, curfmt,
+			convbuf, &convfmt);
 
-		fmt.bps = convfmt.bps;
-		fmt.is_float = convfmt.is_float;
-
-		writebuf = convbuf.ptr;
+		curfmt.bps = convfmt.bps;
+		curfmt.is_float = convfmt.is_float;
 	}
 	else
 	{
-		writebuf = data;
+		writebuf = inbuf;
 	}
 
 	processing_request request = {
-		buffer_size: fmt_frames2bytes(fmt, frames),
-		samplerate: fmt.samplerate,
-		bitspersample: fmt.bps.to!uint8_t,
-		channels: fmt.channels.to!uint8_t,
+		buffer_size: writebuf.length,
+		samplerate: curfmt.samplerate,
+		bitspersample: cast(uint8_t)curfmt.bps,
+		channels: cast(uint8_t)curfmt.channels,
 	};
 	write_req_and_data(self, &request, writebuf);
 }
 
 void write_req_and_data(
 	Child* self,
-	const(processing_request)* request,
-	const(char)* data)
+	const(processing_request*) request,
+	const(void[]) data)
 {
 	iovec[2] iov = [
 		{
@@ -115,48 +96,53 @@ void write_req_and_data(
 			iov_len: (*request).sizeof,
 		},
 		{
-			iov_base: cast(void*)data,
+			iov_base: cast(void*)data.ptr,
 			iov_len: request.buffer_size,
 		},
 	];
 	errnoEnforce(writev(self.fds[1], iov.ptr, iov.length) == iov[0].iov_len+iov[1].iov_len);
 }
 
-uint do_read(
+void[] do_read(
 	Child* self,
-	ddb_waveformat_t* fmt,
-	const(ddb_waveformat_t)* wantfmt,
-	char* data,
-	size_t datacap)
+	ddb_waveformat_t* curfmt,
+	const(ddb_waveformat_t*) wantfmt,
+	void[] outbuf)
+out
 {
-	processing_response response = void;
+	assert(*curfmt == *wantfmt);
+}
+do
+{
+	processing_response response;
 	errnoEnforce(read_full(self.fds[0], &response, response.sizeof));
 
-	enforce((response.buffer_size % fmt_frame_size(fmt)) == 0);
-
-	const(uint) frames_read = fmt_bytes2frames(fmt, response.buffer_size);
-
-	if (frames_read > 0)
+	if (response.buffer_size > 0)
 	{
-		if (*fmt != *wantfmt)
+		if (*curfmt != *wantfmt)
 		{
-			char[] readbuf = new char[response.buffer_size];
-			errnoEnforce(read_full(self.fds[0], readbuf.ptr, readbuf.length));
-			pcm_convert_s(fmt, readbuf.ptr, frames_read, wantfmt, data, datacap);
-			*fmt = *wantfmt;
+			void[] tmpbuf = new void[response.buffer_size];
+			errnoEnforce(read_full(self.fds[0], tmpbuf));
+
+			outbuf = pcm_convert_s(
+				tmpbuf, curfmt,
+				outbuf, wantfmt);
+
+			*curfmt = *wantfmt;
 		}
 		else
 		{
-			enforce(response.buffer_size <= datacap);
-			errnoEnforce(read_full(self.fds[0], data, response.buffer_size));
+			outbuf = outbuf[0..response.buffer_size];
+			errnoEnforce(read_full(self.fds[0], outbuf));
 		}
 	}
 	else
 	{
-		*fmt = *wantfmt;
+		outbuf = outbuf[0..0];
+		*curfmt = *wantfmt;
 	}
 
-	return frames_read;
+	return outbuf;
 }
 
 // -----------------------------------------------------------------------------
@@ -166,11 +152,11 @@ static immutable char[8] mark1 = [0x8f, 0xad, 0xb2, 0xe9, 0xcd, 0x17, 0xec, 0xda
 static immutable char[8] mark2 = [0x1c, 0xd3, 0x96, 0xe0, 0x0c, 0xd2, 0x42, 0xac];
 static immutable char[8] mark3 = ['D',  'e',  'a',  'D',  'B',  'e',  'e',  'F',];
 
-void pcm_convert_s(
+void[] pcm_convert_s(
 	const(void[]) inbuf,
-	const(ddb_waveformat_t)* infmt,
+	const(ddb_waveformat_t*) infmt,
 	void[] outbuf,
-	const(ddb_waveformat_t)* outfmt)
+	const(ddb_waveformat_t*) outfmt)
 {
 	const(uint) nframes_in = fmt_bytes2frames(infmt, inbuf.length);
 
@@ -193,7 +179,7 @@ void pcm_convert_s(
 	// nothing to do?
 	if (nframes_in == 0)
 	{
-		return;
+		return outbuf[0..0];
 	}
 
 	// are all convertible properties the same already?
@@ -205,10 +191,10 @@ void pcm_convert_s(
 	 {
 		if (outbuf.ptr != inbuf.ptr)
 		{
-			outbuf[0..inbuf.length] = inbuf[0..inbuf.length];
+			outbuf[0..outbufreq] = inbuf[0..outbufreq];
 		}
 
-		return;
+		return outbuf[0..outbufreq];
 	}
 
 	void[] convbuf = outbuf;
@@ -268,6 +254,8 @@ void pcm_convert_s(
 	{
 		outbuf[0..outbufreq] = convbuf[0..outbufreq];
 	}
+
+	return outbuf[0..outbufreq];
 }
 
 void pcm_convert_s(
