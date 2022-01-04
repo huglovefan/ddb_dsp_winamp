@@ -8,6 +8,7 @@ import core.runtime : rt_init, rt_term;
 import std.conv;
 import std.string;
 import std.stdio : _IOLBF, stdout, writefln, writeln;
+import misclib.druntime.threadinit;
 import ddw.child;
 import ddw.chldinit;
 import ddw.chldproc;
@@ -100,6 +101,7 @@ bool isbitdepth(string s)
 
 extern (C) ddb_dsp_context_t* dsp_winamp_open()
 {
+	initForeignThread();
 	Ddw* plugin = new Ddw;
 
 	// D bug: https://issues.dlang.org/show_bug.cgi?id=22624
@@ -133,6 +135,7 @@ extern (C) ddb_dsp_context_t* dsp_winamp_open()
 
 extern (C) void dsp_winamp_close(ddb_dsp_context_t* ctx)
 {
+	initForeignThread();
 	Ddw* plugin = cast(Ddw*)ctx;
 
 	child_stop(&plugin.host);
@@ -148,6 +151,7 @@ extern (C) int dsp_winamp_process(
 	ddb_waveformat_t* fmt,
 	float* ratio)
 {
+	initForeignThread();
 	Ddw* plugin = cast(Ddw*)ctx;
 
 	const(void[]) inbuf = (cast(void*)samples_)[0..fmt_frames2bytes(fmt, frames_in)];
@@ -202,6 +206,7 @@ extern (C) int dsp_winamp_process(
 
 extern (C) void dsp_winamp_reset(ddb_dsp_context_t* ctx)
 {
+	initForeignThread();
 	have_patch1 = !!deadbeef.conf_get_int("ddw.patch1", 0);
 }
 
@@ -209,11 +214,13 @@ enum NUM_PARAMS = 2;
 
 extern (C) int dsp_winamp_num_params()
 {
+	initForeignThread();
 	return NUM_PARAMS;
 }
 
 extern (C) const(char)* dsp_winamp_get_param_name(int p)
 {
+	initForeignThread();
 	switch (p)
 	{
 		case 0:
@@ -227,6 +234,7 @@ extern (C) const(char)* dsp_winamp_get_param_name(int p)
 
 extern (C) void dsp_winamp_set_param(ddb_dsp_context_t* ctx, int p, const(char)* val_)
 {
+	initForeignThread();
 	Ddw* plugin = cast(Ddw*)ctx;
 	string val = cast(string)val_.fromStringz;
 	char* newdll;
@@ -270,6 +278,7 @@ extern (C) void dsp_winamp_set_param(ddb_dsp_context_t* ctx, int p, const(char)*
 
 extern (C) void dsp_winamp_get_param(ddb_dsp_context_t* ctx, int p, char* str, int len)
 {
+	initForeignThread();
 	Ddw* plugin = cast(Ddw*)ctx;
 
 	switch (p)
@@ -294,6 +303,7 @@ extern (C) void dsp_winamp_get_param(ddb_dsp_context_t* ctx, int p, char* str, i
 
 extern (C) int dsp_winamp_can_bypass(ddb_dsp_context_t* ctx, ddb_waveformat_t* fmt)
 {
+	initForeignThread();
 	Ddw* plugin = cast(Ddw*)ctx;
 	int convinfo;
 
