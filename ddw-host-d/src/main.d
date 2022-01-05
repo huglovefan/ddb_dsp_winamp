@@ -256,7 +256,7 @@ extern (C) int _Dmain(string[] args)
 	//
 	foreach (ref pl; globals.plugins)
 	{
-		if (!pl.opts.doconf)
+		if (pl.opts.noconf)
 		{
 			pl.confdone = true;
 			continue;

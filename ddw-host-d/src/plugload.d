@@ -34,17 +34,17 @@ void apply_defaults(PluginOpts* outp)
 	switch (outp.dllname)
 	{
 		case "dsp_centercut.dll":
-			outp.doconf = 0;
+			outp.noconf = true;
 			outp.bits = "16,24,32"; // 8 = loud
 			break;
 
 		case "dsp_freeverb.dll":
-			outp.may_stretch = false;
+			outp.nostretch = true;
 			outp.bits = "8,16,32"; // 24 = static. probably only really works with 16
 			break;
 
 		case "dsp_pacemaker.dll":
-			outp.doconf = 0;
+			outp.noconf = true;
 			outp.bits = "16,24,32"; // 8 = distorts when stretching
 			break;
 
@@ -53,7 +53,7 @@ void apply_defaults(PluginOpts* outp)
 			break;
 
 		case "dsp_stereo_tool.dll":
-			outp.may_stretch = false;
+			outp.nostretch = true;
 			outp.bits = "16,24,32"; // 8 = loud
 			outp.required = true;
 			break;
@@ -77,6 +77,7 @@ bool parse_plugin_options(string s, PluginOpts* outp)
 		{
 			OPT_UINT,
 			OPT_BOOL,
+			OPT_INVBOOL,
 			OPT_DSTR,
 		}
 		Type type;
@@ -92,10 +93,9 @@ bool parse_plugin_options(string s, PluginOpts* outp)
 		{"pmf", Option.Type.OPT_UINT, {u: &outp.process_min_frames}},
 		{"pMf", Option.Type.OPT_UINT, {u: &outp.process_max_frames}},
 		{"pfm", Option.Type.OPT_UINT, {u: &outp.process_frames_mult}},
-		{"stretch", Option.Type.OPT_BOOL, {b: &outp.may_stretch}},
-		{"conf", Option.Type.OPT_BOOL, {b: &outp.doconf}},
+		{"stretch", Option.Type.OPT_INVBOOL, {b: &outp.nostretch}},
+		{"conf", Option.Type.OPT_INVBOOL, {b: &outp.noconf}},
 		{"required", Option.Type.OPT_BOOL, {b: &outp.required}},
-		{"trace", Option.Type.OPT_BOOL, {b: &outp.trace}},
 		{"rate", Option.Type.OPT_DSTR, {D: &outp.rate}},
 		{"bits", Option.Type.OPT_DSTR, {D: &outp.bits}},
 		{"ch", Option.Type.OPT_DSTR, {D: &outp.ch}},
@@ -155,7 +155,7 @@ next:
 			size_t prefixlen;
 			if (opt.name == name)
 				goto match;
-			if (opt.type == Option.Type.OPT_BOOL)
+			if (opt.type == Option.Type.OPT_BOOL || opt.type == Option.Type.OPT_INVBOOL)
 			{
 				if (startsWith(name, "do") && name[2..$] == opt.name)
 					{ prefixlen = 2; goto match; }
@@ -180,6 +180,7 @@ match:
 				}
 				break;
 			case Option.Type.OPT_BOOL:
+			case Option.Type.OPT_INVBOOL:
 				try
 				{
 					*opt.v.b = value.length > 0 ? !!value.to!int : true;
@@ -190,6 +191,8 @@ match:
 					goto err;
 				}
 				if (prefixlen != 0 && name[0] == 'n') // negated // <-- won't this bug out when the real name start with n?
+					*opt.v.b = !*opt.v.b;
+				if (opt.type == Option.Type.OPT_INVBOOL)
 					*opt.v.b = !*opt.v.b;
 				break;
 			case Option.Type.OPT_DSTR:
@@ -206,7 +209,7 @@ match:
 			outp.process_min_frames = 576;
 			outp.process_max_frames = 576;
 			outp.process_frames_mult = 576;
-			outp.may_stretch = 1;
+			outp.nostretch = false;
 			goto next;
 		}
 
@@ -298,16 +301,15 @@ unittest
 	assert(opts.required);
 
 	assert(parse_plugin_options(
-		"dsp_unknown.dll:9:pmf=10:pMf=20:pfm=5:stretch:nostretch:dostretch:stretch=0:stretch=1:conf:noconf:doconf:conf=0:conf=1:required:notrequired:required=0:required=1:trace:notrace:trace=0:trace=1:rate=8000,44100:bits=8,24:ch=1,2", &opts));
+		"dsp_unknown.dll:9:pmf=10:pMf=20:pfm=5:stretch:nostretch:dostretch:stretch=0:stretch=1:conf:noconf:doconf:conf=0:conf=1:required:notrequired:required=0:required=1:rate=8000,44100:bits=8,24:ch=1,2", &opts));
 	assert(opts.path.fromStringz == "dsp_unknown.dll");
 	assert(opts.module_idx == 9);
 	assert(opts.process_min_frames == 10);
 	assert(opts.process_max_frames == 20);
 	assert(opts.process_frames_mult == 5);
-	assert(opts.may_stretch);
-	assert(opts.doconf);
+	assert(!opts.nostretch);
+	assert(!opts.noconf);
 	assert(opts.required);
-	assert(opts.trace);
 	assert(opts.rate == "8000,44100");
 	assert(opts.bits == "8,24");
 	assert(opts.ch == "1,2");

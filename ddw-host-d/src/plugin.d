@@ -10,12 +10,11 @@ struct Plugin
 	winampDSPModule* module_;
 	Buf buf;
 	PluginOpts opts;
-	int skip; /// true if this plugin should be skipped when processing (incompatible format)
+	bool skip; /// true if this plugin should be skipped when processing (incompatible format)
 
 	bool confdone;
-	size_t lastbufsz;
 
-	void* dll;
+	HMODULE dll;
 }
 
 enum MODULE_IDX_DEFAULT = -1;
@@ -25,14 +24,13 @@ enum MODULE_IDX_DEFAULT = -1;
 
 struct PluginOpts
 {
-	bool trace = false;
-
 	int module_idx = MODULE_IDX_DEFAULT;
 	uint process_min_frames = 576;
 	uint process_max_frames = 576;
 	uint process_frames_mult = 576;
-	bool may_stretch = true;
-	bool doconf = true;
+
+	bool nostretch = false;
+	bool noconf = false;
 	bool required = false;
 
 	string path;

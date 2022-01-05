@@ -88,7 +88,7 @@ void plugin_process(
 			buf_clear(&pl.buf);
 		}
 
-		if (processable == avail || !pl.opts.may_stretch)
+		if (processable == avail || pl.opts.nostretch)
 			tmp = data;
 
 		plugin_process_twobuf_or_just_one(pl, fmt, data, tmp);
@@ -114,7 +114,7 @@ void plugin_process_twobuf_or_just_one(
 	Buf* tmp)
 {
 	const(size_t) fs = fmt_frame_size(fmt);
-	const(uint) pl_stretch_factor = (pl.opts.may_stretch) ? MAX_STRETCH_FACTOR : 1;
+	const(uint) pl_stretch_factor = (!pl.opts.nostretch) ? MAX_STRETCH_FACTOR : 1;
 
 	if (tmp == data)
 	{
@@ -187,7 +187,7 @@ void ModifySamples_s(
 	uint* outbuf_frames_out)
 {
 	const(size_t) fs = fmt_frame_size(fmt);
-	const(uint) pl_stretch_factor = (pl.opts.may_stretch) ? MAX_STRETCH_FACTOR : 1;
+	const(uint) pl_stretch_factor = (!pl.opts.nostretch) ? MAX_STRETCH_FACTOR : 1;
 
 	const(uint) inbuf_frames = processable_size(pl, *inbuf_frames_out);
 	const(uint) outbuf_frames = *outbuf_frames_out;
