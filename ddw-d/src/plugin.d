@@ -210,44 +210,18 @@ extern (C) void dsp_winamp_reset(ddb_dsp_context_t* ctx)
 	have_patch1 = !!deadbeef.conf_get_int("ddw.patch1", 0);
 }
 
-enum NUM_PARAMS = 2;
-
-extern (C) int dsp_winamp_num_params()
+struct Param
 {
-	initForeignThread();
-	return NUM_PARAMS;
+	string name;
+	void function(Ddw*, string) set;
+	void function(Ddw*, char[]) get;
 }
 
-extern (C) const(char)* dsp_winamp_get_param_name(int p)
-{
-	initForeignThread();
-	switch (p)
+static immutable Param[] params = [
 	{
-		case 0:
-			return "Path to plugin";
-		case 1:
-			return "Max. bit depth";
-		default:
-			return "?";
-	}
-}
-
-extern (C) void dsp_winamp_set_param(ddb_dsp_context_t* ctx, int p, const(char)* val_)
-{
-	initForeignThread();
-	Ddw* plugin = cast(Ddw*)ctx;
-	string val = cast(string)val_.fromStringz;
-	char* newdll;
-
-	if (val == DSPCONFIG_EMPTY_STRING)
-		val = "";
-
-	if (val.length > 99)
-		deadbeef.log("dsp_winamp: warning: dsp options are limited to 99 characters\n");
-
-	switch (p)
-	{
-		case 0:
+		name: "Path to plugin",
+		set: (plugin, val)
+		{
 			if (val != plugin.dll)
 			{
 				child_stop(&plugin.host);
@@ -255,9 +229,16 @@ extern (C) void dsp_winamp_set_param(ddb_dsp_context_t* ctx, int p, const(char)*
 
 				plugin.dll = val.dup;
 			}
-			break;
-
-		case 1:
+		},
+		get: (plugin, buf)
+		{
+			snprintf(buf.ptr, buf.length, "%s", plugin.dll.toStringz);
+		},
+	},
+	{
+		name: "Max. bit depth",
+		set: (plugin, val)
+		{
 			if (isbitdepth(val))
 			{
 				plugin.max_bps = val.to!ushort;
@@ -268,49 +249,84 @@ extern (C) void dsp_winamp_set_param(ddb_dsp_context_t* ctx, int p, const(char)*
 				plugin.max_bps = 16;
 			}
 			child_reset_failures(&plugin.host);
-			break;
+		},
+		get: (plugin, buf)
+		{
+			snprintf(buf.ptr, buf.length, "%u", plugin.max_bps);
+		},
+	},
+];
 
-		default:
-			writefln("dsp_winamp: tried to set nonexistent option index %d to \"%s\"", p, val.toStringz);
-			break;
-	}
+extern (C) int dsp_winamp_num_params()
+{
+	initForeignThread();
+
+	return cast(int)params.length;
 }
 
-extern (C) void dsp_winamp_get_param(ddb_dsp_context_t* ctx, int p, char* str, int len)
+extern (C) const(char)* dsp_winamp_get_param_name(int p)
+{
+	initForeignThread();
+
+	if (cast(uint)p < params.length)
+		return params[p].name.ptr;
+	else
+		return "?";
+}
+
+extern (C) void dsp_winamp_set_param(ddb_dsp_context_t* ctx, int p, const(char)* val_)
 {
 	initForeignThread();
 	Ddw* plugin = cast(Ddw*)ctx;
+	string val = cast(string)val_.fromStringz;
 
-	switch (p)
+	if (val == DSPCONFIG_EMPTY_STRING)
+		val = "";
+
+	if (val.length > 99)
+		deadbeef.log("dsp_winamp: warning: dsp options are limited to 99 characters\n");
+
+	if (cast(uint)p < params.length)
+		params[p].set(plugin, val);
+	else
+		writefln("dsp_winamp: tried to set nonexistent option index %s to \"%s\"", p, val);
+}
+
+extern (C) void dsp_winamp_get_param(ddb_dsp_context_t* ctx, int p, char* str_, int len)
+{
+	initForeignThread();
+	Ddw* plugin = cast(Ddw*)ctx;
+	char[] buf = str_[0..len];
+
+	if (len <= 0)
+		return;
+
+	if (cast(uint)p < params.length)
 	{
-		case 0:
-			snprintf(str, len, "%s", plugin.dll.toStringz);
-			break;
+		params[p].get(plugin, buf);
 
-		case 1:
-			snprintf(str, len, "%u", plugin.max_bps);
-			break;
-
-		default:
-			writefln("dsp_winamp: tried to get nonexistent option index %d", p);
-			str[0] = '\0';
-			break;
+		if (buf[0] == '\0')
+			snprintf(buf.ptr, buf.length, "%s", DSPCONFIG_EMPTY_STRING.ptr);
 	}
-
-	if (*str == '\0')
-		snprintf(str, len, "%s", DSPCONFIG_EMPTY_STRING.ptr);
+	else
+	{
+		writefln("dsp_winamp: tried to get nonexistent option index %s", p);
+		buf[0] = '\0';
+	}
 }
 
 extern (C) int dsp_winamp_can_bypass(ddb_dsp_context_t* ctx, ddb_waveformat_t* fmt)
 {
 	initForeignThread();
 	Ddw* plugin = cast(Ddw*)ctx;
-	int convinfo;
+
+	if (plugin.host.pid != -1)
+		return false;
 
 	if (ddw_has_dll(plugin))
 		return false;
 
-	convinfo = ddw_next_needs_conversion(plugin, fmt);
+	int convinfo = ddw_next_needs_conversion(plugin, fmt);
 	if (convinfo != 0)
 		return false;
 

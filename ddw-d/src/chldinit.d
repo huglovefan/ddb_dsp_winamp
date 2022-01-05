@@ -33,7 +33,7 @@ void child_start(Child* self)
 		host = deadbeef.conf_get_str_fast("ddw.host_cmd", "ddw_host.exe").fromStringz.idup;
 	}
 
-	const(char)* cmd = format!"exec %s %s"(host, self.pl.dll.fromStringz).toStringz;
+	const(char)* cmd = format("exec %s %s", host, self.pl.dll).toStringz;
 
 	pid_t pid = fork();
 	errnoEnforce(pid >= 0);

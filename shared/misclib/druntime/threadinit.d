@@ -6,11 +6,19 @@ import core.thread.osthread : Thread, rt_moduleTlsCtor, rt_moduleTlsDtor, thread
 import core.thread.threadbase : thread_detachThis;
 import misclib.os.atexit_thread : ThreadExitHandler;
 
+pragma(inline, true)
 void initForeignThread() nothrow
 {
-	if (Thread.getThis())
-		return;
+	if (!Thread.getThis())
+		doInitForeignThread();
+}
 
+// -----------------------------------------------------------------------------
+
+private:
+
+void doInitForeignThread() nothrow
+{
 	ThreadExitHandler handler = {&deinitForeignThread, cast(void*)1};
 
 	if (!handler.allocate())
@@ -29,10 +37,6 @@ void initForeignThread() nothrow
 	if (!handler.enable())
 		assert(0);
 }
-
-// -----------------------------------------------------------------------------
-
-private:
 
 extern (C) void deinitForeignThread(void*) nothrow
 {
