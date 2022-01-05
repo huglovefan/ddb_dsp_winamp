@@ -4,7 +4,7 @@ import core.stdc.errno;
 import core.sys.posix.poll;
 import core.sys.posix.pthread;
 import core.sys.posix.unistd;
-import std.exception;
+import std.exception : errnoEnforce;
 import misclib.druntime.threadinit;
 import ddw.shm.plugin;
 

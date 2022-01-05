@@ -3,13 +3,14 @@ module ddw.shm.shm;
 import core.sys.posix.fcntl;
 import core.sys.posix.sys.mman;
 import core.sys.posix.unistd;
-import std.conv;
-import std.exception;
-import std.string;
+import std.exception : errnoEnforce;
+import std.string : toStringz;
+
+enum o600 = 384;
 
 void* shmnew(string path, size_t sz)
 {
-	int fd = open(path.toStringz, O_RDWR|O_CREAT|O_EXCL, octal!600);
+	int fd = open(path.toStringz, O_RDWR|O_CREAT|O_EXCL, o600);
 	errnoEnforce(fd != -1);
 
 	scope (exit)

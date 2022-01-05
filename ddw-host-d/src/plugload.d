@@ -7,7 +7,7 @@ import core.sys.windows.winbase;
 import core.sys.windows.windef;
 
 import std.array : split;
-import std.algorithm.iteration : filter, splitter;
+import std.algorithm.iteration : splitter;
 import std.algorithm.searching : canFind, endsWith, startsWith;
 import std.conv : ConvException, to;
 import std.file : exists;
@@ -346,8 +346,11 @@ string find_dll(string path)
 			searchpath ~= winehomedir~"/.local/lib";
 		}
 
-		foreach (dir; searchpath.filter!exists)
+		foreach (dir; searchpath)
 		{
+			if (!dir.exists)
+				continue;
+
 			string candidate = dir~'/'~path;
 
 			if (candidate.exists)

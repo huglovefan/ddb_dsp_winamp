@@ -3,9 +3,9 @@ module ddw.shm.plugin;
 import core.stdc.stdio;
 import core.sys.posix.unistd;
 import core.runtime : rt_init, rt_term;
-import std.exception;
-import std.process;
-import std.string;
+import std.exception : errnoEnforce;
+import std.format : format;
+import std.process : environment;
 import misclib.druntime.threadinit;
 import ddw.shmdata;
 import ddw.shm.shm;
@@ -90,7 +90,7 @@ extern (C) int shm_message(uint32_t id, uintptr_t ctx, uint32_t p1, uint32_t p2)
 extern (C) int shm_connect()
 {
 	initForeignThread();
-	shmname = format!"/dev/shm/deadbeef.%s"(getpid());
+	shmname = format("/dev/shm/deadbeef.%s", getpid());
 	shm = cast(Shm*)shmnew(shmname, Shm.sizeof);
 	environment["DDW_SHM_NAME"] = shmname;
 	tickthread_init();
