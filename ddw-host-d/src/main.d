@@ -160,6 +160,9 @@ extern (C) int _Dmain(string[] args)
 
 		setvbuf(stdout, null, _IONBF, 0);
 		setvbuf(stderr, null, _IONBF, 0);
+
+		_setmode(globals.datapipe.in_fd, _O_BINARY);
+		_setmode(globals.datapipe.out_fd, _O_BINARY);
 	}
 
 	//
