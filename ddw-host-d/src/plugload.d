@@ -342,6 +342,12 @@ string find_dll(string path)
 
 		if (string winehomedir = environment.get("WINEHOMEDIR"))
 		{
+			// i get an error if this prefix is here so remove it
+			// wine: Read access denied for device L"\\??\\Z:\\", FS volume label and serial are not available.
+			enum prefix = "\\??\\";
+			if (winehomedir.startsWith(prefix))
+				winehomedir = winehomedir[prefix.length..$];
+
 			searchpath ~= winehomedir~"/.local/lib/winamp";
 			searchpath ~= winehomedir~"/.local/lib";
 		}
