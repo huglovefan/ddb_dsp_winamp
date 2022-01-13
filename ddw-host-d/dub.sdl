@@ -1,6 +1,5 @@
 name "ddw-host-d"
 targetType "executable"
-sourcePaths "src" "../shared"
 libs "ntdll" platform="windows-x86_mscoff"
 libs "user32" platform="windows"
 lflags "/subsystem:windows"
