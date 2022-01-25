@@ -1,3 +1,0 @@
-name "ddw-shm-d"
-targetType "dynamicLibrary"
-sourceFiles "src/zzz_deadbeef.c"

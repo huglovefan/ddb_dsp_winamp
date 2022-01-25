@@ -1,0 +1,327 @@
+module ddw.host.main;
+
+import core.stdc.stdio;
+import core.stdc.stdlib;
+
+import core.sys.windows.winbase;
+import core.sys.windows.windef;
+import core.sys.windows.winuser;
+
+import std.process : environment;
+import std.stdio : writefln;
+import std.string : toStringz;
+
+import ddw.common.shmdata;
+import ddw.host.buf;
+import ddw.host.misc;
+import ddw.host.plugin;
+import ddw.host.plugproc;
+import ddw.host.plugload;
+import ddw.host.procmain;
+import ddw.host.shm;
+import ddw.host.wndproc;
+
+struct globals
+{
+	__gshared static:
+
+	Plugin[] plugins;
+
+	Shm* shm;
+
+	HWND mainwin;
+	DWORD main_tid;
+
+	static struct datapipe
+	{
+		__gshared static:
+
+		int in_fd = -1;
+		int out_fd = -1;
+	}
+}
+
+// -----------------------------------------------------------------------------
+
+private:
+
+enum STDIN_FILENO = 0;
+enum STDOUT_FILENO = 1;
+enum STDERR_FILENO = 2;
+
+extern (C) int dup(int);
+extern (C) int dup2(int, int);
+extern (C) int close(int);
+extern (C) int open(const(char)*, int);
+
+// https://docs.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-createthread
+enum STACK_SIZE_PARAM_IS_A_RESERVATION = 0x00010000;
+
+// https://github.com/wine-mirror/wine/blob/80e2154/include/msvcrt/fcntl.h
+enum O_RDWR = 2;
+
+// -----------------------------------------------------------------------------
+
+bool new_plugin(string arg, Plugin* pl)
+{
+	if (!parse_plugin_options(arg, &pl.opts))
+	{
+		writefln("error: option parsing failed for argument \"%s\"", arg);
+		return false;
+	}
+
+	if (!load_plugin(pl))
+	{
+		writefln("error: plugin load failed for dll \"%s\"", pl.opts.path);
+		return false;
+	}
+
+	return true;
+}
+
+// -----------------------------------------------------------------------------
+
+int mainloop()
+{
+	MSG msg;
+	int status = 0;
+
+	for (;;)
+	{
+		int rv = GetMessage(&msg, null, 0, 0);
+		if (rv > 0)
+		{
+			TranslateMessage(&msg);
+			DispatchMessage(&msg);
+			continue;
+		}
+		if (rv < 0)
+		{
+			PrintError("GetMessage");
+			status = 1;
+		}
+		break;
+	}
+
+	if (msg.message == WM_QUIT)
+		status = cast(int)msg.wParam;
+
+	return status;
+}
+
+extern (Windows) uint conf_thread_main(void* ud)
+{
+	Plugin* pl = cast(Plugin*)ud;
+	pl.module_.Config(pl.module_);
+	pl.confdone = true;
+	return 0;
+}
+
+// https://github.com/dlang/druntime/blob/master/src/rt/dmain2.d
+extern (C) int _d_run_main(int, char**, MainFunc) nothrow @nogc;
+alias extern (C) int function(string[]) MainFunc;
+
+extern (Windows) int WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nShowCmd)
+{
+	return _d_run_main(0, null, &_Dmain);
+}
+
+extern (C) int _Dmain(string[] args)
+{
+	void* procthread = null;
+	int rv = 0;
+
+	globals.main_tid = GetCurrentThreadId();
+
+	//
+	// set up fds
+	//
+	{
+		int nul = -1;
+
+		bool nok =
+			(nul = open("NUL", O_RDWR)) == -1 || // open NUL for redirecting
+			(globals.datapipe.in_fd = dup(STDIN_FILENO)) == -1 || // duplicate stdin to in_fd
+			(globals.datapipe.out_fd = dup(STDOUT_FILENO)) == -1 || // duplicate stdout to out_fd
+			dup2(nul, STDIN_FILENO) == -1 || // set stdin to the /dev/null fd
+			dup2(STDERR_FILENO, STDOUT_FILENO) == -1; // set stdout to stderr
+
+		if (nul != -1)
+		{
+			close(nul);
+			nul = -1;
+		}
+
+		if (nok)
+		{
+			writefln("error: fd shuffle failed");
+			goto err;
+		}
+
+		setvbuf(stdout, null, _IONBF, 0);
+		setvbuf(stderr, null, _IONBF, 0);
+
+		_setmode(globals.datapipe.in_fd, _O_BINARY);
+		_setmode(globals.datapipe.out_fd, _O_BINARY);
+	}
+
+	//
+	// open shm file
+	//
+	if (string shmpath = environment.get("DDW_SHM_NAME"))
+	{
+		globals.shm = cast(Shm*)shmnew(shmpath, Shm.sizeof);
+		if (globals.shm == null)
+			writefln("warning: shm open failed");
+	}
+	else
+	{
+		writefln("warning: DDW_SHM_NAME not set");
+	}
+
+	//
+	// create IPC message window
+	// https://stackoverflow.com/a/4081383
+	//
+	{
+		WNDCLASSEX wx = {
+			cbSize: WNDCLASSEX.sizeof,
+			lpfnWndProc: (globals.shm != null)
+				? cast(typeof(&DefWindowProc))&WindowProc // cast to nothrow
+				: &DefWindowProc,
+			hInstance: GetModuleHandle(null),
+			lpszClassName: "Winamp v1.x",
+		};
+		if (RegisterClassEx(&wx) == 0)
+		{
+			PrintError("RegisterClassEx");
+			goto err;
+		}
+
+		globals.mainwin = CreateWindowEx(
+			0,
+			wx.lpszClassName,
+			"Winamp",
+			0,
+			0, 0, 0, 0,
+			HWND_MESSAGE,
+			null,
+			wx.hInstance,
+			null);
+		if (globals.mainwin == null)
+		{
+			PrintError("CreateWindowEx");
+			goto err;
+		}
+	}
+
+	//
+	// ancient ritual
+	//
+	{
+		MSG tmp;
+		PeekMessage(&tmp, null, 0, 0, PM_NOREMOVE);
+	}
+
+	//
+	// load plugins
+	//
+	globals.plugins = new Plugin[args.length-1];
+	for (int i = 1; i < args.length; i++)
+	{
+		if (!new_plugin(args[i], &globals.plugins[i-1]))
+			goto err;
+	}
+	if (globals.plugins.length == 0)
+	{
+		writefln("it works");
+		goto err;
+	}
+
+	//
+	// start processing thread
+	//
+	procthread = CreateThread(
+		null,
+		16*1024*1024,
+		&process_thread_main,
+		null,
+		STACK_SIZE_PARAM_IS_A_RESERVATION,
+		null);
+	if (procthread == null)
+	{
+		PrintError("CreateThread");
+		goto err;
+	}
+
+	//
+	// call config() for plugins that need it
+	//
+	foreach (ref pl; globals.plugins)
+	{
+		if (pl.opts.noconf)
+		{
+			pl.confdone = true;
+			continue;
+		}
+
+		pl.confdone = false;
+
+		HANDLE confthread = CreateThread(
+			null,
+			0,
+			&conf_thread_main,
+			&pl,
+			0,
+			null);
+
+		if (confthread == null)
+		{
+			PrintError("CreateThread");
+			pl.confdone = true;
+			continue;
+		}
+
+		CloseHandle(confthread);
+	}
+
+	//
+	// run main loop
+	//
+	rv = mainloop();
+
+	//
+	// wait (2000ms) for the processing thread to exit
+	//
+Lout:
+	if (procthread != null)
+	{
+		if (WaitForSingleObject(procthread, 2000) != WAIT_OBJECT_0)
+			assert(0, "failed to join thread in 2000ms");
+
+		CloseHandle(procthread);
+		procthread = null;
+	}
+
+	while (globals.plugins.length != 0)
+	{
+		Plugin* pl = &globals.plugins[$-1];
+
+		if (pl.confdone)
+		{
+			pl.module_.Quit(pl.module_);
+			FreeLibrary(pl.dll);
+		}
+
+		buf_free(&pl.buf);
+
+		globals.plugins = globals.plugins[0..$-1];
+	}
+
+	return rv;
+err:
+	if (rv == 0)
+		rv = 1;
+
+	goto Lout;
+}

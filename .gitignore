@@ -1,8 +1,7 @@
-.dub/
-*-test-library
 *.c
 *.exe
+*.o
 *.obj
+*.pdb
 *.so
 README
-core.[0-9]*
