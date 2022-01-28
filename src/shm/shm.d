@@ -1,3 +1,5 @@
+module ddw.shm.shm;
+
 import core.sys.posix.fcntl;
 import core.sys.posix.sys.mman;
 import core.sys.posix.unistd;

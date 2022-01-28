@@ -1,3 +1,5 @@
+module ddw.plugin.child;
+
 import core.sys.posix.unistd;
 import ddw.plugin.main;
 

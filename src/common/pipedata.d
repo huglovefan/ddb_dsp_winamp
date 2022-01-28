@@ -1,3 +1,5 @@
+module ddw.common.pipedata;
+
 import core.stdc.stdint;
 
 align (1) struct processing_request {

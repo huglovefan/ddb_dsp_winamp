@@ -1,3 +1,5 @@
+module ddw.shm.deadbeef;
+
 public import c_deadbeef :
 	DB_EV_PAUSED,
 	DB_EV_SONGSTARTED,

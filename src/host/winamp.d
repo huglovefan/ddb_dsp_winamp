@@ -1,3 +1,5 @@
+module ddw.host.winamp;
+
 extern (C):
 
 import core.sys.windows.windef;

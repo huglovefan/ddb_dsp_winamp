@@ -1,3 +1,5 @@
+module ddw.common.shmdata;
+
 import core.stdc.stdint;
 
 enum ISPLAYING_PLAYING = 1;

@@ -1,3 +1,5 @@
+module ddw.host.plugin;
+
 import core.sys.windows.windef;
 
 import ddw.host.buf;

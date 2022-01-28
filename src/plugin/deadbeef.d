@@ -1,3 +1,5 @@
+module ddw.plugin.deadbeef;
+
 public import c_deadbeef :
 	DB_PLUGIN_DSP,
 	DB_dsp_s,

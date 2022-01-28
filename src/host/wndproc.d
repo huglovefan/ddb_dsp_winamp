@@ -1,3 +1,5 @@
+module ddw.host.wndproc;
+
 import core.stdc.stdio;
 
 import core.sys.windows.winbase;

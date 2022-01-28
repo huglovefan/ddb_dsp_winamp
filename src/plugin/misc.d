@@ -1,3 +1,5 @@
+module ddw.plugin.misc;
+
 import core.sys.posix.unistd;
 
 bool read_full(int fd, void* data, size_t size)

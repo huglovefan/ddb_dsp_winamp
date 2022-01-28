@@ -1,3 +1,5 @@
+module ddw.host.fmt;
+
 private extern (C) void _d_assertp(immutable(char)* file, uint line);
 
 // -----------------------------------------------------------------------------

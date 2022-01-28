@@ -1,3 +1,5 @@
+module ddw.plugin.chldproc;
+
 import core.stdc.stdint;
 import core.sys.posix.sys.uio;
 

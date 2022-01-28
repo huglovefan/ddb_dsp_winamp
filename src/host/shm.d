@@ -1,3 +1,5 @@
+module ddw.host.shm;
+
 import core.stdc.stdio;
 
 import core.sys.windows.winbase;

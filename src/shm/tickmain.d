@@ -1,3 +1,5 @@
+module ddw.shm.tickmain;
+
 import core.stdc.errno;
 import core.sys.posix.poll;
 import core.sys.posix.pthread;

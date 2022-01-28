@@ -1,3 +1,5 @@
+module misclib.druntime.threadinit;
+
 version (D_BetterC) {} else: // betterC doesn't have the runtime in the first place
 
 import core.thread.osthread : Thread, rt_moduleTlsCtor, rt_moduleTlsDtor, thread_attachThis;

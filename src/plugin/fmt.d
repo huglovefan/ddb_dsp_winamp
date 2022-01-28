@@ -1,3 +1,5 @@
+module ddw.plugin.fmt;
+
 import ddw.plugin.deadbeef;
 
 private extern (C) void _d_assertp(immutable(char)* file, uint line);

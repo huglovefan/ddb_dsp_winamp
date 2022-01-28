@@ -1,3 +1,5 @@
+module ddw.plugin.chldinit;
+
 import core.stdc.errno;
 import core.stdc.stdio;
 import core.stdc.stdlib;

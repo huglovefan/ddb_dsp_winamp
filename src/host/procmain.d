@@ -1,3 +1,5 @@
+module ddw.host.procmain;
+
 import core.stdc.errno;
 import core.stdc.stdint;
 import core.stdc.stdio;

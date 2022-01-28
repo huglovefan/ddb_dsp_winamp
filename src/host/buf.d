@@ -1,3 +1,5 @@
+module ddw.host.buf;
+
 import core.stdc.stdlib;
 import core.stdc.string;
 

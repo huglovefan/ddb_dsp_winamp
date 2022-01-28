@@ -1,3 +1,5 @@
+module ddw.host.misc;
+
 import core.stdc.config : ssize_t = c_long;
 import core.stdc.errno;
 import core.stdc.stdio;

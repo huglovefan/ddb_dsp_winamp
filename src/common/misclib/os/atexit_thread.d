@@ -1,3 +1,5 @@
+module misclib.os.atexit_thread;
+
 struct ThreadExitHandler
 {
 	extern (C) void function(void*) fn;
