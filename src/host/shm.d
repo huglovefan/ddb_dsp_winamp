@@ -6,17 +6,15 @@ import core.sys.windows.winbase;
 import core.sys.windows.windef;
 import core.sys.windows.ntdef;
 
-import std.string : toStringz;
-
 import ddw.host.misc;
 
-void* shmnew(string path, size_t sz)
+void* shmnew(const(char)* path, size_t sz)
 {
 	//
 	// open the file in Z:\dev\shm
 	//
 	HANDLE File = CreateFileA(
-		path.toStringz,
+		path,
 		GENERIC_READ|GENERIC_WRITE,
 		FILE_SHARE_READ|FILE_SHARE_WRITE,
 		null,
@@ -104,12 +102,10 @@ bool tryEnableDEP()
 		Value.sizeof);
 
 	if (Status >= 0) // NT_SUCCESS
-	{
 		return true;
-	}
 	else
 	{
-		fprintf(stderr, "NtSetInformationProcess: %s\n", NtStrError(Status));
+		printf("NtSetInformationProcess: %s\n", NtStrError(Status));
 		return false;
 	}
 }
@@ -127,7 +123,7 @@ void disableDEP()
 		Value.sizeof);
 
 	if (!(Status >= 0)) // NT_SUCCESS
-		fprintf(stderr, "NtSetInformationProcess: %s\n", NtStrError(Status));
+		printf("NtSetInformationProcess: %s\n", NtStrError(Status));
 }
 
 enum MEM_EXECUTE_OPTION_DISABLE = 0x01;
@@ -140,11 +136,11 @@ enum PROCESSINFOCLASS
 
 version (CRuntime_Microsoft)
 {
-	extern (Windows) NTSTATUS NtSetInformationProcess(HANDLE, PROCESSINFOCLASS, PVOID, ULONG);
+	extern(Windows) NTSTATUS NtSetInformationProcess(HANDLE, PROCESSINFOCLASS, PVOID, ULONG);
 }
 else
 {
-	alias extern (Windows) NTSTATUS function(HANDLE, PROCESSINFOCLASS, PVOID, ULONG) TNtSetInformationProcess;
+	alias extern(Windows) NTSTATUS function(HANDLE, PROCESSINFOCLASS, PVOID, ULONG) TNtSetInformationProcess;
 	__gshared TNtSetInformationProcess pNtSetInformationProcess;
 
 	NTSTATUS NtSetInformationProcess(HANDLE arg1, PROCESSINFOCLASS arg2, PVOID arg3, ULONG arg4)

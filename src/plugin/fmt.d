@@ -2,26 +2,34 @@ module ddw.plugin.fmt;
 
 import ddw.plugin.deadbeef;
 
-private extern (C) void _d_assertp(immutable(char)* file, uint line);
+// https://wiki.osdev.org/CPU_Registers_x86-64
+// https://en.wikipedia.org/wiki/X86_calling_conventions#System_V_AMD64_ABI
+
+private extern(C) void _d_assertp(const(char)* file, uint line);
 
 // -----------------------------------------------------------------------------
 
 size_t fmt_frame_size(const(ddb_waveformat_t)* fmt) pure
 {
-	return fmt.channels * (fmt.bps >> 3);
+	return (fmt.bps >> 3) * fmt.channels;
 }
 
 // -----------------------------------------------------------------------------
 
-size_t fmt_frames2bytes(/*RSI*/const(ddb_waveformat_t)*, /*EDI*/uint) pure
+size_t fmt_frames2bytes(/*RSI*/const(ddb_waveformat_t)* fmt, /*EDI*/uint frames) pure
 {
 	asm pure
 	{
 		naked;
-		mov EAX, dword ptr ddb_waveformat_t.bps.offsetof[RSI];
+
+		// get the frame size in RAX
+		mov EAX, ddb_waveformat_t.bps.offsetof[RSI];
 		shr EAX, 3;
-		mul EAX, dword ptr ddb_waveformat_t.channels.offsetof[RSI];
+		mul EAX, ddb_waveformat_t.channels.offsetof[RSI];
+
+		// multiply 64-bit EDI by RAX, leave the result in RAX
 		mul RDI;
+
 		ret;
 	}
 }
@@ -34,7 +42,7 @@ unittest
 	assert(fmt_frames2bytes(&fmt, 1) == 1*(2*(16/8)));
 	assert(fmt_frames2bytes(&fmt, 123) == 123*(2*(16/8)));
 
-	// biggest possible result with a valid fmt
+	// biggest possible result with a valid fmt (no overflow)
 	fmt.channels = 8;
 	fmt.bps = 32;
 	assert(fmt_frames2bytes(&fmt, uint.max) == 137438953440);
@@ -42,26 +50,27 @@ unittest
 
 // -----------------------------------------------------------------------------
 
-uint fmt_bytes2frames(/*RSI*/const(ddb_waveformat_t)*, /*RDI*/size_t) pure
+uint fmt_bytes2frames(/*RSI*/const(ddb_waveformat_t)* fmt, /*RDI*/size_t bytes) pure
 {
+	version(DigitalMars)
 	asm pure
 	{
 		naked;
 
-		// get frame size
+		// get the frame size in EAX
 		mov EAX, dword ptr ddb_waveformat_t.bps.offsetof[RSI];
 		shr EAX, 3;
 		mul EAX, dword ptr ddb_waveformat_t.channels.offsetof[RSI];
 
-		// move frame size to RCX (since division uses RAX)
+		// move the frame size to RCX (division will use RAX)
 		mov RCX, RAX;
 
 		// divide bytes (RDI) by frame size (RCX)
-		xor RDX, RDX;
-		mov RAX, RDI;
+		mov RAX, RDI; // lower 64 = RDI
+		xor RDX, RDX; // upper 64 = zero
 		div RCX;
-		// -> buffer size (RAX)
-		// -> division remainder (RDX)
+		// -> division result (frame count): RAX
+		// -> division remainder: RDX
 
 		// remainder non-zero -> fail
 		test RDX, RDX;
@@ -74,12 +83,23 @@ uint fmt_bytes2frames(/*RSI*/const(ddb_waveformat_t)*, /*RDI*/size_t) pure
 
 		ret;
 fail:
-		mov ESI, 77; // line number
+		mov ESI, 86; // line number
 		lea RDI, filename;
 		call _d_assertp;
-		int 3;
+		ud2;
 filename:
 		db "fmt.d\0";
+	}
+	else
+	{
+		size_t fs = (fmt.bps>>3) * fmt.channels;
+		size_t div = bytes / fs;
+		size_t rem = bytes % fs;
+		if (rem != 0) goto Lfail;
+		if (div > uint.max) goto Lfail;
+		return cast(uint)div;
+Lfail:
+		assert(0);
 	}
 }
 
@@ -241,7 +261,42 @@ unittest
 
 // -----------------------------------------------------------------------------
 
-bool fmt_same(const(ddb_waveformat_t)* fmt1, const(ddb_waveformat_t)* fmt2)
+bool fmt_same(const(ddb_waveformat_t)* /*RSI*/fmt1, const(ddb_waveformat_t)* /*RDI*/fmt2)
 {
-	return *fmt1 == *fmt2;
+	static assert(ddb_waveformat_t.sizeof == 3*ulong.sizeof);
+	asm
+	{
+		naked;
+		xor RAX, RAX;
+
+		mov RDX, 0[RSI];
+		xor RDX, 0[RDI];
+		or RAX, RDX;
+
+		mov RDX, 8[RSI];
+		xor RDX, 8[RDI];
+		or RAX, RDX;
+
+		mov RDX, 16[RSI];
+		xor RDX, 16[RDI];
+		or RAX, RDX;
+
+		test RAX, RAX;
+		sete AL;
+
+		ret;
+	}
+}
+
+unittest
+{
+	foreach (size_t byt; 0..ddb_waveformat_t.sizeof)
+	foreach (size_t bit; 0..8)
+	{
+		ddb_waveformat_t fmt1;
+		ddb_waveformat_t fmt2;
+		assert(fmt_same(&fmt1, &fmt2));
+		*(cast(ubyte*)&fmt2+byt) |= 1<<bit;
+		assert(!fmt_same(&fmt1, &fmt2));
+	}
 }

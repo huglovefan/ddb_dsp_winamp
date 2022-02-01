@@ -12,8 +12,6 @@ import core.atomic;
 import core.thread.osthread : rt_moduleTlsCtor, rt_moduleTlsDtor, thread_attachThis;
 import core.thread.threadbase : thread_detachThis;
 
-import std.stdio : writefln, writeln;
-
 import ddw.common.pipedata;
 import ddw.host.buf;
 import ddw.host.fmt;
@@ -23,7 +21,8 @@ import ddw.host.plugin;
 import ddw.host.plugload;
 import ddw.host.plugproc;
 
-extern (Windows) uint process_thread_main(void* ud)
+extern(Windows)
+uint process_thread_main(void*)
 {
 	try
 	{ // ---
@@ -35,11 +34,6 @@ extern (Windows) uint process_thread_main(void* ud)
 
 	thread_attachThis();
 	rt_moduleTlsCtor();
-	scope (exit)
-	{
-		rt_moduleTlsDtor();
-		thread_detachThis();
-	}
 
 	for (;;)
 	{
@@ -100,6 +94,8 @@ Lout:
 	PostThreadMessage(globals.main_tid, WM_QUIT,
 		/* wParam */ thread_rv,
 		/* lParam */ 0);
+	rt_moduleTlsDtor();
+	thread_detachThis();
 	return 0;
 err:
 	thread_rv = 1;
@@ -107,19 +103,19 @@ err:
 read1fail:
 	if (errno != 0)
 		goto readerr;
-	writefln("process thread got EOF");
+	printf("process thread got EOF\n");
 	goto Lout;
 writeerr:
 	if (errno != 0)
 		perror("write");
 	else
-		writefln("write: unexpected EOF");
+		printf("write: unexpected EOF\n");
 	goto err;
 readerr:
 	if (errno != 0)
 		perror("read");
 	else
-		writefln("read: unexpected EOF");
+		printf("read: unexpected EOF\n");
 	goto err;
 
 	} // ---
@@ -127,12 +123,14 @@ readerr:
 	{
 		Plugin* pl = cast(Plugin*)procplug.atomicLoad();
 		if (pl != null)
-			writefln("fatal error: %s threw during processing", pl.opts.dllname);
+			printf("fatal error: %s threw during processing\n",
+				pl.opts.dllname.ptr);
 		else
-			writefln("fatal error: uncaught exception in processing thread");
+			printf("fatal error: uncaught exception in processing thread\n");
 		while (e)
 		{
-			writeln(e);
+			string s = e.toString();
+			printf("%.*s", cast(int)s.length, s.ptr);
 			e = e.next;
 		}
 		TerminateProcess(GetCurrentProcess(), 1);
@@ -147,27 +145,27 @@ private:
 /**
  * check that the format and buffer size match and aren't random data
  */
-bool checkreadparams(const(Fmt)* fmt, uint64_t buffer_size)
+bool checkreadparams(const(Fmt)* fmt, ulong buffer_size)
 {
 	bool ok = true;
 
 	if (!fmt_makes_sense(fmt))
 	{
-		writefln("error: read nonsensical input format: rate=%s bps=%s ch=%s",
+		printf("error: read nonsensical input format: rate=%u bps=%u ch=%u\n",
 			fmt.rate, fmt.bps, fmt.ch);
 		ok = false;
 	}
 
 	if (buffer_size > size_t.max)
 	{
-		writefln("error: input data size %s doesn't fit in size_t",
+		printf("error: input data size %llu doesn't fit in size_t\n",
 			buffer_size);
 		ok = false;
 	}
 
 	if ((buffer_size % fmt_frame_size(fmt)) != 0)
 	{
-		writefln("error: input data size %s is not a multiple of frame size %s",
+		printf("error: input data size %llu is not a multiple of frame size %u\n",
 			buffer_size, fmt_frame_size(fmt));
 		ok = false;
 	}
@@ -183,7 +181,7 @@ bool checkreadparams(const(Fmt)* fmt, uint64_t buffer_size)
  */
 bool fmtchange(Plugin[] plugins, const(Fmt)* fmt)
 {
-	writefln("format change: rate=%s bps=%s ch=%s",
+	printf("format change: rate=%u bps=%u ch=%u\n",
 		fmt.rate, fmt.bps, fmt.ch);
 
 	foreach (ref pl; plugins)
@@ -202,24 +200,22 @@ bool fmtchange(Plugin[] plugins, const(Fmt)* fmt)
 
 bool compat_update(Plugin* pl, const(Fmt)* fmt)
 {
-	string what;
-
-	what = plugin_supports_format(pl, fmt);
+	const(char)* what = plugin_supports_format(pl, fmt);
 	pl.skip = (what != null);
 
 	if (pl.skip)
 	{
 		if (pl.opts.required)
 		{
-			writefln("error: required plugin %s doesn't support this %s, exiting",
-				pl.opts.dllname,
+			printf("error: required plugin %s doesn't support this %s, exiting\n",
+				pl.opts.dllname.ptr,
 				what);
 
 			return false;
 		}
 
-		writefln("warning: disabling %s due to unsupported %s",
-			pl.opts.dllname,
+		printf("warning: %s doesn't support this %s, disabling it\n",
+			pl.opts.dllname.ptr,
 			what);
 	}
 

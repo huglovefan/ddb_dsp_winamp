@@ -1,6 +1,5 @@
 module ddw.host.misc;
 
-import core.stdc.config : ssize_t = c_long;
 import core.stdc.errno;
 import core.stdc.stdio;
 import core.stdc.stdlib;
@@ -11,27 +10,28 @@ import core.sys.windows.windef;
 nothrow:
 @nogc:
 
-extern (C) ssize_t write(int fd, const(void)*, size_t);
-extern (C) ssize_t read(int fd, void*, size_t);
+// -----------------------------------------------------------------------------
 
-string superbasename(string path)
+inout(char)* strchrnul(inout(char)* s, int c)
 {
-	ssize_t lastslash = -1;
+	while (*s && *s != c) s++;
+	return s;
+}
 
-	foreach (size_t i, char c; path)
+// -----------------------------------------------------------------------------
+
+inout(char)[] superbasename(inout(char)[] path)
+{
+	size_t sp = 0;
+	foreach_reverse (i; 0..path.length)
 	{
-		switch (c)
+		if (path.ptr[i] == '/' || path.ptr[i] == '\\')
 		{
-			case '/':
-			case '\\':
-				lastslash = i;
-				break;
-			default:
-				break;
+			sp = i+1;
+			break;
 		}
 	}
-
-	return lastslash != -1 ? path[lastslash+1..$] : path;
+	return path[sp..$];
 }
 
 unittest
@@ -39,7 +39,19 @@ unittest
 	assert(superbasename("a") == "a");
 	assert(superbasename("a/b") == "b");
 	assert(superbasename("a\\b") == "b");
+	superbasename("");
+	superbasename("a");
+	superbasename("/");
+	superbasename("a/");
+	superbasename("/a");
+	superbasename("a/a");
 }
+
+// -----------------------------------------------------------------------------
+
+// https://github.com/wine-mirror/wine/blob/master/dlls/msvcrt/file.c
+private extern(C) int write(int fd, const(void)*, uint);
+private extern(C) int read(int fd, void*, uint);
 
 // success                 -> true
 // EOF with nothing read   -> false, errno = 0
@@ -47,74 +59,78 @@ unittest
 // error with nothing read -> false, errno set
 // error with partial read -> false, errno set
 
-bool read_full(int fd, void* p_, size_t sz)
+bool read_full(int fd, void* p, size_t sz)
 {
-	char* p = cast(char*)p_;
-	ssize_t rv;
-again:
-	rv = read(fd, p, sz);
+	const void* base = p;
 
-	if (cast(size_t)rv == sz)
-		return true;
-
-	if (rv == 0)
+	for (;;)
 	{
-		errno = (p != p_) ? EIO : 0;
-		return false;
+		int rv = read(fd, p, sz);
+
+		if (cast(size_t)rv == sz)
+			return true;
+
+		if (rv == 0)
+		{
+			errno = (p != base) ? EIO : 0;
+			return false;
+		}
+
+		if (rv == -1)
+			return false;
+
+		sz -= cast(size_t)rv;
+		p += cast(size_t)rv;
 	}
-
-	if (rv == -1)
-		return false;
-
-	sz -= cast(size_t)rv;
-	p += cast(size_t)rv;
-
-	goto again;
 }
 
-bool write_full(int fd, const(void)* p_, size_t sz)
+bool write_full(int fd, const(void)* p, size_t sz)
 {
-	const(char)* p = cast(char*)p_;
-	ssize_t rv;
-again:
-	rv = write(fd, p, sz);
+	const void* base = p;
 
-	if (cast(size_t)rv == sz)
-		return true;
-
-	if (rv == 0)
+	for (;;)
 	{
-		errno = (p != p_) ? EIO : 0;
-		return false;
+		int rv = write(fd, p, sz);
+
+		if (cast(size_t)rv == sz)
+			return true;
+
+		if (rv == 0)
+		{
+			errno = (p != base) ? EIO : 0;
+			return false;
+		}
+
+		if (rv == -1)
+			return false;
+
+		sz -= cast(size_t)rv;
+		p += cast(size_t)rv;
 	}
-
-	if (rv == -1)
-		return false;
-
-	sz -= cast(size_t)rv;
-	p += cast(size_t)rv;
-
-	goto again;
 }
 
-extern (Windows) ULONG RtlNtStatusToDosError(NTSTATUS Status);
+// -----------------------------------------------------------------------------
+
+private extern(Windows) ULONG RtlNtStatusToDosError(NTSTATUS);
 
 const(char)* NtStrError(NTSTATUS Status)
 {
-	version (CRuntime_Microsoft)
+	version(CRuntime_Microsoft)
 		return StrError(RtlNtStatusToDosError(Status));
 	else
 	{
-		__gshared static char[24] buf = '\0';
+		__gshared static char[24] buf = 0;
 		snprintf(buf.ptr, buf.length, "NTSTATUS %d", Status);
 		return buf.ptr;
 	}
 }
 
-LPCSTR StrError(DWORD Code)
+// -----------------------------------------------------------------------------
+
+PCSTR StrError(DWORD Code)
 {
 	DWORD Length;
-	__gshared static CHAR[128] Buf = '\0';
+	__gshared static CHAR[128] Buf = 0;
 
 	Length = FormatMessageA(
 		FORMAT_MESSAGE_FROM_SYSTEM,
@@ -127,18 +143,21 @@ LPCSTR StrError(DWORD Code)
 
 	// remove trailing newline
 	while (Length > 0 && Buf[Length-1] < 32)
-		Buf[--Length] = '\0';
+		Buf[--Length] = 0;
 
 	if (Length == 0)
-		snprintf(Buf.ptr, Buf.length, "%ld", Code);
+		snprintf(Buf.ptr, Buf.length, "%u", Code);
 
 	return Buf.ptr;
 }
 
-VOID PrintError(LPCSTR What)
+// -----------------------------------------------------------------------------
+
+VOID PrintError(PCSTR What)
 {
-	if (What != null)
-		fprintf(stderr, "%s: %s\n", What, StrError(GetLastError()));
+	PCSTR se = StrError(GetLastError());
+	if (What)
+		printf("%s: %s\n", What, se);
 	else
-		fprintf(stderr, "%s\n", StrError(GetLastError()));
+		printf("%s\n", se);
 }

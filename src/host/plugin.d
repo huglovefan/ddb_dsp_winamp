@@ -33,10 +33,10 @@ struct PluginOpts
 	bool noconf = false;
 	bool required = false;
 
-	string path;
-	string dllname;
+	const(char)[] path;
+	const(char)[] dllname;
 
-	string rate;
-	string bits;
-	string ch;
+	uint[] rate;
+	uint[] bits;
+	uint[] ch;
 }

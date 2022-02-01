@@ -7,59 +7,71 @@ import core.sys.posix.dirent;
 import core.sys.posix.poll;
 import core.sys.posix.sys.wait;
 import core.sys.posix.unistd;
-import std.exception;
-import std.format;
-import std.stdio : writefln;
-import std.string;
+import ddw.common.gc;
 import ddw.plugin.child;
 import ddw.plugin.main;
 
-void child_start(Child* self)
+bool child_start(Child* self)
 {
 	assert(self.pid == -1);
 
-	int[2] stdin = [-1, -1];
-	errnoEnforce(pipe(stdin) == 0);
-	scope (failure) { close(stdin[0]); close(stdin[1]); }
+	// pipe = [read_end, write_end]
+	//         ↓ read()  ↑ write()
 
-	int[2] stdout = [-1, -1];
-	errnoEnforce(pipe(stdout) == 0);
-	scope (failure) { close(stdout[0]); close(stdout[1]); }
-
-	string host;
+	int[2] input = [-1, -1];
+	if (pipe(input) != 0)
 	{
-		deadbeef.conf_lock();
-		scope (exit) deadbeef.conf_unlock();
-		host = deadbeef.conf_get_str_fast("ddw.host_cmd", "ddw_host.exe").fromStringz.idup;
+		perror("pipe");
+		return false;
 	}
 
-	const(char)* cmd = format("exec %s %s", host, self.pl.dll).toStringz;
+	int[2] output = [-1, -1];
+	if (pipe(output) != 0)
+	{
+		perror("pipe");
+		close(input[0]);
+		close(input[1]);
+		return false;
+	}
+
+	deadbeef.conf_lock();
+	string host = gcstrdup(deadbeef.conf_get_str_fast("ddw.host_cmd", "ddw_host.exe"));
+	deadbeef.conf_unlock();
+
+	char[] cmd = gcprintf("exec %.*s %.*s",
+		cast(int)host.length, host.ptr,
+		cast(int)self.pl.dll.length, self.pl.dll.ptr);
 
 	pid_t pid = fork();
-	errnoEnforce(pid >= 0);
-	if (pid == 0)
+	if (pid == -1)
 	{
-		if (
-			dup2(stdin[0], STDIN_FILENO) == -1 ||
-			dup2(stdout[1], STDOUT_FILENO) == -1)
-		{
-			perror("dsp_winamp: dup2");
-			goto chlderr;
-		}
+		perror("fork");
+		close(input[0]);
+		close(input[1]);
+		close(output[0]);
+		close(output[1]);
+		return false;
+	}
+	else if (pid == 0)
+	{
+		if (dup2(input[0], STDIN_FILENO) < 0) goto Lchldfail;
+		if (dup2(output[1], STDOUT_FILENO) < 0) goto Lchldfail;
 		close_extra();
-		execl("/bin/sh", "sh", "-c".ptr, cmd, null);
-		perror("dsp_winamp: execl");
-chlderr:
-		for (;;) _exit(EXIT_FAILURE);
+		execl("/bin/sh", "sh", "-c".ptr, cmd.ptr, null);
+Lchldfail:
+		_exit(errno);
+		asm { ud2; }
 	}
 	else
 	{
-		errnoEnforce(close(stdin[0]) == 0); stdin[0] = -1;
-		errnoEnforce(close(stdout[1]) == 0); stdout[1] = -1;
+		close(input[0]);
+		close(output[1]);
 
 		self.pid = pid;
-		self.fds[0] = stdout[0];
-		self.fds[1] = stdin[1];
+		self.fds[0] = output[0];
+		self.fds[1] = input[1];
+
+		return true;
 	}
 }
 
@@ -68,64 +80,64 @@ void child_stop(Child* self)
 	if (self.pid == -1)
 		return;
 
-	errnoEnforce(close(self.fds[1]) == 0); self.fds[1] = -1;
+	debug assert(self.fds[0] != -1);
+	debug assert(self.fds[1] != -1);
 
-	scope (exit)
-	{
-		self.pid = -1;
-		errnoEnforce(close(self.fds[0]) == 0); self.fds[0] = -1;
-	}
+	// close their stdin
+	// this should cause them to eventually exit
+	close(self.fds[1]); self.fds[1] = -1;
 
-	for (int attempt = 0; /* true */; attempt++)
+	int killcnt = 0;
+	for (;;)
 	{
-		int waitstatus;
-		int waitrv = (trywait(self, 1000))
-			? waitpid(self.pid, &waitstatus, 0)
-			: waitpid(self.pid, &waitstatus, WNOHANG);
+		int waitstatus = void;
+		int waitrv = waitpid(self.pid, &waitstatus,
+			(trywait(self, 1000)) ? 0 : WNOHANG);
 
 		if (waitrv == -1)
 		{
-			if (errno == ECHILD)
-				break;
+			if (errno == EINTR) // wait interrupted by signal
+				continue;
 
-			for (;;) errnoEnforce(0);
+			perror("waitpid");
+			break;
 		}
-
-		// used WNOHANG (trywait timed out) but the child hasn't yet exited
-		if (waitrv == 0)
+		else if (waitrv == 0)
 		{
-			if (attempt == 0)
+			if (killcnt == 0)
 			{
-				writefln("dsp_winamp: child didn't exit in 1000ms, sending SIGTERM...");
+				printf("dsp_winamp: sending SIGTERM\n");
 				if (kill(self.pid, SIGTERM) != 0 && errno != ESRCH)
-					errnoEnforce(0);
+					perror("kill");
+				killcnt += 1;
 				continue;
 			}
-			else if (attempt == 1)
+			if (killcnt == 1)
 			{
-				writefln("dsp_winamp: child didn't exit in 2000ms, sending SIGKILL...");
+				printf("dsp_winamp: sending SIGKILL\n");
 				if (kill(self.pid, SIGKILL) != 0 && errno != ESRCH)
-					errnoEnforce(0);
+					perror("kill");
+				killcnt += 1;
 				continue;
 			}
-			else
-			{
-				writefln("dsp_winamp: gave up waiting for child to exit!");
-				break;
-			}
-		}
 
-		if (WIFEXITED(waitstatus))
-		{
-			writefln("dsp_winamp: child exited with status %d", WEXITSTATUS(waitstatus));
+			printf("dsp_winamp: gave up waiting for child to exit\n");
+			break;
 		}
-		if (WIFSIGNALED(waitstatus))
+		else if (waitrv == self.pid)
 		{
-			writefln("dsp_winamp: child was killed by signal %d", WTERMSIG(waitstatus));
-		}
+			if (WIFEXITED(waitstatus))
+				printf("dsp_winamp: child exited with status %d\n", WEXITSTATUS(waitstatus));
+			if (WIFSIGNALED(waitstatus))
+				printf("dsp_winamp: child was killed by signal %d\n", WTERMSIG(waitstatus));
 
-		break;
+			break;
+		}
+		assert(0, "unreachable");
 	}
+
+	self.pid = -1;
+	close(self.fds[0]); self.fds[0] = -1;
 }
 
 void child_record_success(Child* self)
@@ -153,7 +165,7 @@ void child_record_failure(Child* self)
 	self.successes = 0;
 }
 
-bool child_is_doomed(Child* self)
+bool child_is_doomed(const(Child)* self)
 {
 	return (self.failures >= FAILURE_LIMIT);
 }
@@ -168,16 +180,21 @@ void child_reset_failures(Child* self)
 
 private:
 
-extern (C) int scandir(const(char)*, dirent***, void*, void*);
+extern(C) int scandir(const(char)*, dirent***, void*, void*) nothrow @nogc;
 
-void close_extra()
+/**
+ * close all open fds above 2
+ * 
+ * bug: scandir isn't safe to be called after fork
+ */
+void close_extra() nothrow @nogc
 {
-	dirent** namelist;
+	dirent** namelist = void;
 	int count = scandir("/proc/self/fd", &namelist, null, null);
 	if (count == -1)
 		return;
 
-	for (int i = 0; i < count; i++)
+	foreach (i; 0..cast(size_t)count)
 	{
 		int fd = atoi(namelist[i].d_name.ptr);
 		if (fd > 2)
@@ -188,27 +205,45 @@ void close_extra()
 	free(namelist);
 }
 
-//
-// try-wait the child with a timeout by polling its stdout
-//
-bool trywait(Child* self, int ms)
+/**
+ * try-wait the child process by using poll() on their stdout
+ * 
+ * when they exit and their end of the stdout pipe gets closed, poll() on the
+ *  other end should return POLLHUP
+ * 
+ * polling the fd with empty "pollfd.events" does nothing but wait for the
+ *  timeout or POLLHUP
+ */
+bool trywait(const(Child)* self, int ms)
 {
+	debug assert(self.pid != -1);
+	debug assert(self.fds[0] != -1);
+
 	pollfd pfd = {
 		fd: self.fds[0],
 		events: 0,
 	};
-again:
-	int pollrv = poll(&pfd, 1, ms);
-	if (pollrv == -1 && errno == EINTR)
-		goto again;
+	for (;;)
+	{
+		int pollrv = poll(&pfd, 1, ms);
 
-	// success: other end of the pipe is closed
-	if (pollrv == 1 && pfd.revents&POLLHUP)
-		return true;
+		if (pollrv == -1 && errno == EINTR)     // interrupted by signal
+			continue;
+		if (pollrv == 1 && pfd.revents&POLLHUP) // pipe was closed
+			return true;
+		if (pollrv == 0)                        // wait timed out
+			return false;
 
-	// wait timed out
-	if (pollrv == 0)
+		// should NEVER get here...
+
+		int err = errno;
+		printf("trywait: unknown poll result\n");
+		printf("  pollrv = %d\n", pollrv);
+		printf("  errno = %d\n", err);
+		printf("  pfd.revents = %d\n", pfd.revents);
+
+		debug assert(0);
+
 		return false;
-
-	for (;;) errnoEnforce(0);
+	}
 }

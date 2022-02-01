@@ -1,6 +1,6 @@
 module ddw.host.winamp;
 
-extern (C):
+extern(C):
 
 import core.sys.windows.windef;
 import core.sys.windows.winuser;
@@ -26,7 +26,7 @@ struct winampDSPHeader
 	winampDSPModule* function(int) nothrow @nogc getModule;
 }
 
-alias winampDSPHeader* function() nothrow @nogc winampDSPGetHeaderType;
+alias winampDSPHeader* function(HWND) nothrow @nogc winampDSPGetHeaderType;
 
 // -----------------------------------------------------------------------------
 

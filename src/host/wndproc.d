@@ -1,44 +1,22 @@
 module ddw.host.wndproc;
 
 import core.stdc.stdio;
-
 import core.sys.windows.winbase;
 import core.sys.windows.windef;
 import core.sys.windows.winuser;
-
 import core.atomic;
-
-import std.stdio : writefln;
-import std.string : fromStringz;
-
 import ddw.host.plugin;
 import ddw.host.main;
-import ddw.host.misc;
 import ddw.host.plugproc;
 import ddw.host.winamp;
-
-/**
- * get the name of the plugin that's currently doing stuff
- * 
- * usually this is the one that sent the ipc message
- */
-string get_lastplug()
-{
-	Plugin* pl = cast(Plugin*)procplug.atomicLoad();
-
-	if (pl != null)
-		return pl.opts.dllname;
-	else
-		return "?";
-}
-alias LASTPLUG = get_lastplug;
 
 //debug = spammy;
 
 /**
  * window procedure of the "message-only window" used to receive winamp ipc messages
  */
-extern (Windows) LRESULT WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
+extern(Windows)
+LRESULT WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) nothrow
 {
 	//
 	// handle winamp IPC messages
@@ -47,81 +25,106 @@ extern (Windows) LRESULT WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM 
 	// - http://wiki.winamp.com/wiki/Basic_Plugin_Guide_-_Tutorial
 	// - https://wiki.winehq.org/List_Of_Windows_Messages
 	//
-	// this file best viewed with narrow tabs
-	//
 	alias shm = globals.shm;
-	switch (uMsg)
+
+	if (uMsg == WM_COPYDATA) // 0x004A
 	{
-		case WM_COPYDATA: // 0x004A
-			writefln("warning: unsupported WM_COPYDATA: wParam=%s lParam=%s (%s)",
-				wParam, lParam, LASTPLUG);
-			break;
-
-		case WM_WA_IPC: // WM_USER (0x0400)
-			switch (lParam)
+		printf("warning: unsupported WM_COPYDATA: wParam=%u lParam=%u (%s)\n",
+			wParam, lParam, lastplug());
+	}
+	else if (uMsg == WM_WA_IPC) // WM_USER (0x0400)
+	{
+		if (lParam == IPC_GETOUTPUTTIME) // 105
+		{
+			if (wParam == 0) // position in ms of the currently playing track
 			{
-				case IPC_GETOUTPUTTIME: // 105
-					switch (wParam)
-					{
-						case 0: // position in ms of the currently playing track
-							debug (spammy) writefln("GET shm.playback_pos_ms = %s (%s)", shm.playback_pos_ms, LASTPLUG);
-							return shm.playback_pos_ms;
-
-						case 1: // current track length in seconds
-							writefln("GET shm.track_duration_ms = %s (%s)", shm.track_duration_ms, LASTPLUG);
-							return shm.track_duration_ms/1000;
-
-						case 2: // current track length in milliseconds
-							writefln("GET shm.track_duration_ms = %s (%s)", shm.track_duration_ms, LASTPLUG);
-							return shm.track_duration_ms;
-
-						default:
-							writefln("warning: unsupported IPC_GETOUTPUTTIME: wParam=%s lParam=%s (%s)",
-								wParam, lParam, LASTPLUG);
-							return -1;
-					}
-
-				case IPC_GETLISTPOS: // 125
-					debug (spammy) writefln("GET shm.track_idx = %d (%s)", shm.track_idx, LASTPLUG);
-					return shm.track_idx;
-
-				case IPC_GETPLAYLISTTITLE: // 212
-					debug (spammy) writefln("GET shm.track_title = \"%s\" (%s)", shm.track_title.ptr, LASTPLUG);
-					return cast(LRESULT)shm.track_title.ptr;
-
-				case IPC_GET_API_SERVICE: // 3025
-					// supposed to return a pointer to some C++ abomination added in winamp 5.12
-					return 1; // 1 = not supported
-
-				case IPC_REGISTER_WINAMP_IPCMESSAGE: // 65536
-					writefln("warning: unsupported WM_WA_IPC: wParam=\"%s\" lParam=%s (%s)",
-						fromStringz(cast(char*)wParam), lParam, LASTPLUG);
-					break;
-
-				default:
-					writefln("warning: unsupported WM_WA_IPC: wParam=%s lParam=%s (%s)",
-						wParam, lParam, LASTPLUG);
+				debug(spammy) printf("GET shm.playback_pos_ms = %u (%s)\n",
+					shm.playback_pos_ms, lastplug());
+				return shm.playback_pos_ms;
 			}
-			break;
-
-		case WM_WA_SYSTRAY: // WM_USER+1
-			writefln("warning: unsupported WM_WA_SYSTRAY: wParam=%s lParam=%s (%s)",
-				wParam, lParam, LASTPLUG);
-			break;
-
-		case WM_WA_MPEG_EOF: // WM_USER+2
-			writefln("warning: unsupported WM_WA_MPEG_EOF: wParam=%s lParam=%s (%s)",
-				wParam, lParam, LASTPLUG);
-			break;
-
-		case WM_COMMAND: // 0x0111
-			writefln("warning: unsupported WM_COMMAND: wParam=%s lParam=%s (%s)",
-				wParam, lParam, LASTPLUG);
-			break;
-
-		default:
-			break;
+			else if (wParam == 1) // current track length in seconds
+			{
+				printf("GET shm.track_duration_ms = %u (%s)\n",
+					shm.track_duration_ms, lastplug());
+				return shm.track_duration_ms/1000;
+			}
+			else if (wParam == 2) // current track length in milliseconds
+			{
+				printf("GET shm.track_duration_ms = %u (%s)\n",
+					shm.track_duration_ms, lastplug());
+				return shm.track_duration_ms;
+			}
+			else
+			{
+				printf("warning: unsupported IPC_GETOUTPUTTIME: wParam=%u lParam=%u (%s)\n",
+					wParam, lParam, lastplug());
+				return -1;
+			}
+		}
+		else if (lParam == IPC_GETLISTPOS) // 125
+		{
+			debug(spammy) printf("GET shm.track_idx = %d (%s)\n",
+				shm.track_idx, lastplug());
+			return shm.track_idx;
+		}
+		else if (lParam == IPC_GETPLAYLISTTITLE) // 212
+		{
+			debug(spammy) printf("GET shm.track_title = \"%s\" (%s)\n",
+				shm.track_title.ptr, lastplug());
+			return cast(LRESULT)shm.track_title.ptr;
+		}
+		else if (lParam == IPC_GET_API_SERVICE) // 3025
+		{
+			// supposed to return a pointer to some C++ abomination added in winamp 5.12
+			printf("warning: unsupported WM_WA_IPC: wParam=%u lParam=IPC_GET_API_SERVICE (%s)\n",
+				wParam, lastplug());
+			return 1; // 1 = not supported
+		}
+		else if (lParam == IPC_REGISTER_WINAMP_IPCMESSAGE) // 65536
+		{
+			printf("warning: unsupported WM_WA_IPC: wParam=\"%s\" lParam=IPC_REGISTER_WINAMP_IPCMESSAGE (%s)\n",
+				cast(char*)wParam, lastplug());
+		}
+		else
+		{
+			printf("warning: unsupported WM_WA_IPC: wParam=%u lParam=%u (%s)\n",
+				wParam, lParam, lastplug());
+		}
+	}
+	else if (uMsg == WM_WA_SYSTRAY) // WM_USER+1
+	{
+		printf("warning: unsupported WM_WA_SYSTRAY: wParam=%u lParam=%u (%s)\n",
+			wParam, lParam, lastplug());
+	}
+	else if (uMsg == WM_WA_MPEG_EOF) // WM_USER+2
+	{
+		printf("warning: unsupported WM_WA_MPEG_EOF: wParam=%u lParam=%u (%s)\n",
+			wParam, lParam, lastplug());
+	}
+	else if (uMsg == WM_COMMAND) // 0x0111
+	{
+		printf("warning: unsupported WM_COMMAND: wParam=%u lParam=%u (%s)\n",
+			wParam, lParam, lastplug());
 	}
 
 	return DefWindowProc(hwnd, uMsg, wParam, lParam);
+}
+
+// -----------------------------------------------------------------------------
+
+private:
+
+/**
+ * get the name of the plugin that's currently doing stuff
+ * 
+ * usually this is the one that sent the ipc message
+ */
+const(char)* lastplug() nothrow
+{
+	Plugin* pl = cast(Plugin*)procplug.atomicLoad();
+
+	if (pl != null)
+		return pl.opts.dllname.ptr;
+	else
+		return "?";
 }

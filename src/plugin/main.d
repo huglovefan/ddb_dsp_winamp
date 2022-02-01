@@ -1,19 +1,29 @@
 module ddw.plugin.main;
 
-import core.stdc.stdio : snprintf;
-import core.stdc.stdlib;
+import core.stdc.stdio;
 import core.stdc.string;
+import core.sys.posix.stdlib;
+import core.sys.posix.unistd;
 import core.memory : GC;
 import core.runtime : rt_init, rt_term;
-import std.conv;
-import std.string;
-import std.stdio : _IOLBF, stdout, writefln, writeln;
 import misclib.druntime.threadinit;
+import ddw.common.gc;
+import ddw.common.rtopts : rt_options;
+import ddw.common.shmdata;
 import ddw.plugin.child;
 import ddw.plugin.chldinit;
 import ddw.plugin.chldproc;
-import ddw.plugin.fmt;
 import ddw.plugin.deadbeef;
+import ddw.plugin.fmt;
+import ddw.plugin.shm;
+import ddw.plugin.tickmain;
+
+__gshared
+{
+	DB_functions_t* deadbeef;
+	Shm* shm;
+	char[32] shmname = 0;
+}
 
 struct Ddw
 {
@@ -23,17 +33,12 @@ struct Ddw
 	ushort max_bps;
 }
 
-__gshared DB_functions_t* deadbeef;
-
 bool ddw_has_dll(const(Ddw)* plugin)
 {
 	if (plugin.dll == "")
 		return false;
 
 	if (plugin.dll == DSPCONFIG_EMPTY_STRING)
-		return false;
-
-	if (isbitdepth(plugin.dll))
 		return false;
 
 	return true;
@@ -83,23 +88,10 @@ int ddw_next_needs_conversion(Ddw* plugin, const(ddb_waveformat_t)* curfmt)
 	return rv;
 }
 
-bool isbitdepth(string s)
-{
-	switch (s)
-	{
-		case "8":
-		case "16":
-		case "24":
-		case "32":
-			return true;
-		default:
-			return false;
-	}
-}
-
 // -----------------------------------------------------------------------------
 
-extern (C) ddb_dsp_context_t* dsp_winamp_open()
+extern(C)
+ddb_dsp_context_t* dsp_winamp_open()
 {
 	initForeignThread();
 	Ddw* plugin = new Ddw;
@@ -110,14 +102,17 @@ extern (C) ddb_dsp_context_t* dsp_winamp_open()
 	plugin.host.pid = -1;
 	plugin.host.fds[0] = -1;
 	plugin.host.fds[1] = -1;
-	assert(plugin.host.pid == -1);
-	assert(plugin.host.fds[0] == -1);
-	assert(plugin.host.fds[1] == -1);
-	assert(plugin.host.successes == 0);
-	assert(plugin.host.failures == 0);
-	assert(plugin.host.pl == null);
-	assert(plugin.dll == null);
-	assert(plugin.max_bps == 0);
+	debug
+	{
+		assert(plugin.host.pid == -1);
+		assert(plugin.host.fds[0] == -1);
+		assert(plugin.host.fds[1] == -1);
+		assert(plugin.host.successes == 0);
+		assert(plugin.host.failures == 0);
+		assert(plugin.host.pl == null);
+		assert(plugin.dll == null);
+		assert(plugin.max_bps == 0);
+	}
 
 	// D bug: https://issues.dlang.org/show_bug.cgi?id=22623
 	plugin.ctx.plugin = cast(typeof(plugin.ctx.plugin))cast(void*)cast(DB_dsp_s*)&plugindef;
@@ -126,14 +121,13 @@ extern (C) ddb_dsp_context_t* dsp_winamp_open()
 	plugin.max_bps = 16;
 	plugin.host.pl = plugin;
 
-	stdout.setvbuf(256, _IOLBF);
-
 	GC.addRoot(plugin);
 	static assert(plugin.ctx.offsetof == 0);
 	return &plugin.ctx;
 }
 
-extern (C) void dsp_winamp_close(ddb_dsp_context_t* ctx)
+extern(C)
+void dsp_winamp_close(ddb_dsp_context_t* ctx)
 {
 	initForeignThread();
 	Ddw* plugin = cast(Ddw*)ctx;
@@ -143,7 +137,8 @@ extern (C) void dsp_winamp_close(ddb_dsp_context_t* ctx)
 	GC.removeRoot(plugin);
 }
 
-extern (C) int dsp_winamp_process(
+extern(C)
+int dsp_winamp_process(
 	ddb_dsp_context_t* ctx,
 	float* samples_,
 	int frames_in,
@@ -164,6 +159,8 @@ extern (C) int dsp_winamp_process(
 	if (convinfo&NEED_FLOAT)
 		wantfmt.is_float = 1;
 
+	update_tick();
+
 	void[] plugoutbuf;
 	try
 	{
@@ -176,7 +173,9 @@ extern (C) int dsp_winamp_process(
 	}
 	catch (Exception e)
 	{
-		writeln(e);
+		string s = e.toString();
+		printf("%.*s\n", cast(int)s.length, s.ptr);
+
 		child_record_failure(&plugin.host);
 		child_stop(&plugin.host);
 	}
@@ -204,7 +203,8 @@ extern (C) int dsp_winamp_process(
 	return cast(int)frames_out;
 }
 
-extern (C) void dsp_winamp_reset(ddb_dsp_context_t* ctx)
+extern(C)
+void dsp_winamp_reset(ddb_dsp_context_t* ctx)
 {
 	initForeignThread();
 	have_patch1 = !!deadbeef.conf_get_int("ddw.patch1", 0);
@@ -232,21 +232,24 @@ static immutable Param[] params = [
 		},
 		get: (plugin, buf)
 		{
-			snprintf(buf.ptr, buf.length, "%s", plugin.dll.toStringz);
+			snprintf(buf.ptr, buf.length, "%.*s",
+				cast(int)plugin.dll.length, plugin.dll.ptr);
 		},
 	},
 	{
 		name: "Max. bit depth",
 		set: (plugin, val)
 		{
-			if (isbitdepth(val))
+			switch (val)
 			{
-				plugin.max_bps = val.to!ushort;
-			}
-			else
-			{
-				deadbeef.log("dsp_winamp: invalid bit depth entered\n");
-				plugin.max_bps = 16;
+				case "8": plugin.max_bps = 8; break;
+				case "16": plugin.max_bps = 16; break;
+				case "24": plugin.max_bps = 24; break;
+				case "32": plugin.max_bps = 32; break;
+				default:
+					deadbeef.log("dsp_winamp: invalid bit depth entered\n");
+					plugin.max_bps = 16;
+					break;
 			}
 			child_reset_failures(&plugin.host);
 		},
@@ -257,14 +260,16 @@ static immutable Param[] params = [
 	},
 ];
 
-extern (C) int dsp_winamp_num_params()
+extern(C)
+int dsp_winamp_num_params()
 {
 	initForeignThread();
 
 	return cast(int)params.length;
 }
 
-extern (C) const(char)* dsp_winamp_get_param_name(int p)
+extern(C)
+const(char)* dsp_winamp_get_param_name(int p)
 {
 	initForeignThread();
 
@@ -274,11 +279,12 @@ extern (C) const(char)* dsp_winamp_get_param_name(int p)
 		return "?";
 }
 
-extern (C) void dsp_winamp_set_param(ddb_dsp_context_t* ctx, int p, const(char)* val_)
+extern(C)
+void dsp_winamp_set_param(ddb_dsp_context_t* ctx, int p, const(char)* val_)
 {
 	initForeignThread();
 	Ddw* plugin = cast(Ddw*)ctx;
-	string val = cast(string)val_.fromStringz;
+	string val = gcstrdup(val_);
 
 	if (val == DSPCONFIG_EMPTY_STRING)
 		val = "";
@@ -289,10 +295,11 @@ extern (C) void dsp_winamp_set_param(ddb_dsp_context_t* ctx, int p, const(char)*
 	if (cast(uint)p < params.length)
 		params[p].set(plugin, val);
 	else
-		writefln("dsp_winamp: tried to set nonexistent option index %s to \"%s\"", p, val);
+		printf("dsp_winamp: tried to set nonexistent option index %d to \"%s\"\n", p, val_);
 }
 
-extern (C) void dsp_winamp_get_param(ddb_dsp_context_t* ctx, int p, char* str_, int len)
+extern(C)
+void dsp_winamp_get_param(ddb_dsp_context_t* ctx, int p, char* str_, int len)
 {
 	initForeignThread();
 	Ddw* plugin = cast(Ddw*)ctx;
@@ -305,17 +312,18 @@ extern (C) void dsp_winamp_get_param(ddb_dsp_context_t* ctx, int p, char* str_, 
 	{
 		params[p].get(plugin, buf);
 
-		if (buf[0] == '\0')
+		if (buf[0] == 0)
 			snprintf(buf.ptr, buf.length, "%s", DSPCONFIG_EMPTY_STRING.ptr);
 	}
 	else
 	{
-		writefln("dsp_winamp: tried to get nonexistent option index %s", p);
-		buf[0] = '\0';
+		printf("dsp_winamp: tried to get nonexistent option index %d\n", p);
+		buf[0] = 0;
 	}
 }
 
-extern (C) int dsp_winamp_can_bypass(ddb_dsp_context_t* ctx, ddb_waveformat_t* fmt)
+extern(C)
+int dsp_winamp_can_bypass(ddb_dsp_context_t* ctx, ddb_waveformat_t* fmt)
 {
 	initForeignThread();
 	Ddw* plugin = cast(Ddw*)ctx;
@@ -333,15 +341,115 @@ extern (C) int dsp_winamp_can_bypass(ddb_dsp_context_t* ctx, ddb_waveformat_t* f
 	return true;
 }
 
-extern (C) int dsp_winamp_start()
+extern(C)
+int dsp_winamp_start()
 {
-	rt_init();
+	if (!rt_init()) return 1;
+
+	// https://github.com/ldc-developers/ldc/issues/2782
+	version(LDC)
+	{
+		import c_deadbeef :
+			c_setvbuf = setvbuf,
+			c_stdout = stdout;
+		c_setvbuf(c_stdout, null, _IOLBF, 256);
+	}
+	else
+		setvbuf(stdout, null, _IOLBF, 256);
+
 	return 0;
 }
 
-extern (C) int dsp_winamp_stop()
+extern(C)
+int dsp_winamp_stop()
 {
+	initForeignThread();
 	rt_term();
+	return 0;
+}
+
+extern(C)
+int dsp_winamp_connect()
+{
+	initForeignThread();
+
+	snprintf(shmname.ptr, shmname.length, "/dev/shm/deadbeef.%d", getpid());
+
+	shm = cast(Shm*)shmnew(shmname.ptr, Shm.sizeof);
+	if (shm)
+	{
+		setenv("DDW_SHM_NAME", shmname.ptr, 1);
+		tickthread_init();
+	}
+
+	return 0;
+}
+
+extern(C)
+int dsp_winamp_disconnect()
+{
+	initForeignThread();
+
+	tickthread_deinit();
+
+	if (shm)
+	{
+		shmfree(shm, Shm.sizeof);
+		shm = null;
+		unlink(shmname.ptr);
+		unsetenv("DDW_SHM_NAME");
+	}
+
+	return 0;
+}
+
+extern(C)
+int dsp_winamp_message(uint id, uintptr_t ctx, uint p1, uint p2)
+{
+	initForeignThread();
+
+	if (id == DB_EV_SONGSTARTED)
+	{
+		shm.isplaying = ISPLAYING_PLAYING;
+		tickthread_unpause();
+
+		deadbeef.pl_lock();
+		ddb_playlist_t* pl = deadbeef.plt_get_curr();
+		DB_playItem_t* trk = deadbeef.streamer_get_playing_track();
+		if (trk)
+		{
+			const(char)* v = deadbeef.pl_find_meta(trk, "title");
+			if (!v) v = "";
+			snprintf(shm.track_title.ptr, shm.track_title.length, "%s", v);
+
+			shm.track_duration_ms = cast(int)(1000.0f*deadbeef.pl_get_item_duration(trk));
+
+			if (pl)
+				shm.track_idx = deadbeef.plt_get_item_idx(pl, trk, PL_MAIN);
+		}
+		if (trk) deadbeef.pl_item_unref(trk);
+		if (pl) deadbeef.plt_unref(pl);
+		deadbeef.pl_unlock();
+	}
+	else if (id == DB_EV_STOP)
+	{
+		shm.isplaying = ISPLAYING_NOTPLAYING;
+		tickthread_pause();
+	}
+	else if (id == DB_EV_PAUSED)
+	{
+		if (p1)
+		{
+			shm.isplaying = ISPLAYING_PAUSED;
+			tickthread_pause();
+		}
+		else
+		{
+			shm.isplaying = ISPLAYING_PLAYING;
+			tickthread_unpause();
+		}
+	}
+
 	return 0;
 }
 
@@ -359,6 +467,9 @@ __gshared DB_dsp_t plugindef = {
 			"property \"DSP plugin can return non-32bit samples\" checkbox ddw.patch1 0;\n",
 		start: &dsp_winamp_start,
 		stop: &dsp_winamp_stop,
+		connect: &dsp_winamp_connect,
+		disconnect: &dsp_winamp_disconnect,
+		message: &dsp_winamp_message,
 	},
 	open: &dsp_winamp_open,
 	close: &dsp_winamp_close,
@@ -374,7 +485,8 @@ __gshared DB_dsp_t plugindef = {
 	can_bypass: &dsp_winamp_can_bypass,
 };
 
-extern (C) DB_plugin_t* dsp_winamp_load(DB_functions_t* ddb)
+extern(C)
+DB_plugin_t* dsp_winamp_load(DB_functions_t* ddb)
 {
 	deadbeef = ddb;
 	return &plugindef.plugin;

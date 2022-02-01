@@ -1,7 +1,7 @@
 module ddw.plugin.child;
 
 import core.sys.posix.unistd;
-import ddw.plugin.main;
+import ddw.plugin.main : Ddw;
 
 enum SUCCESS_LIMIT = 10;
 enum FAILURE_LIMIT = 3;

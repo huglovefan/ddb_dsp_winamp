@@ -3,9 +3,7 @@ module ddw.plugin.chldproc;
 import core.stdc.stdint;
 import core.sys.posix.sys.uio;
 
-import std.algorithm : min;
-import std.conv;
-import std.exception;
+import std.exception : ErrnoException;
 
 import ddw.common.pipedata;
 import ddw.plugin.child;
@@ -42,6 +40,12 @@ void[] child_process_samples(
 // -----------------------------------------------------------------------------
 
 private:
+
+size_t min(size_t a, size_t b)
+{
+	if (a > b) a = b;
+	return a;
+}
 
 void do_write(
 	Child* self,
@@ -92,7 +96,8 @@ void do_write(
 			iov_len: writebuf.length,
 		},
 	];
-	errnoEnforce(writev(self.fds[1], iov.ptr, iov.length) == iov[0].iov_len+iov[1].iov_len);
+	if (writev(self.fds[1], iov.ptr, iov.length) != iov[0].iov_len+iov[1].iov_len)
+		throw new ErrnoException("writev");
 }
 
 void[] do_read(
@@ -107,14 +112,16 @@ out
 do
 {
 	processing_response response;
-	errnoEnforce(read_full(self.fds[0], &response, response.sizeof));
+	if (!read_full(self.fds[0], &response, response.sizeof))
+		throw new ErrnoException("read_full");
 
 	if (response.buffer_size > 0)
 	{
 		if (*curfmt != *wantfmt)
 		{
 			void[] tmpbuf = new void[response.buffer_size];
-			errnoEnforce(read_full(self.fds[0], tmpbuf));
+			if (!read_full(self.fds[0], tmpbuf))
+				throw new ErrnoException("read_full");
 
 			outbuf = pcm_convert_s(
 				tmpbuf, curfmt,
@@ -125,7 +132,8 @@ do
 		else
 		{
 			outbuf = outbuf[0..response.buffer_size];
-			errnoEnforce(read_full(self.fds[0], outbuf));
+			if (!read_full(self.fds[0], outbuf))
+				throw new ErrnoException("read_full");
 		}
 	}
 	else
