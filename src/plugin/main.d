@@ -461,6 +461,7 @@ __gshared DB_dsp_t plugindef = {
 		id: "dsp_winamp",
 		name: "winamp dsp",
 		descr: "",
+		copyright: "",
 		website: "https://github.com/huglovefan/ddb_dsp_winamp",
 		configdialog:
 			"property \"Host command\" entry ddw.host_cmd \"ddw_host.exe\";\n"~
