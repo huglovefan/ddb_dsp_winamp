@@ -1,90 +1,78 @@
+
 all: plugin host
-
-ez:
-	make testpl
-	make testhst
-	make plugin opt=1 debug=1 dmd=ldc2
-	make host opt=1 debug=1
-	make install
-
-plugin: dsp_winamp.so
-host: ddw-host-d.exe
-
-dmd ?= dmd
-size ?= size
-
-#dflags += -checkaction=halt
-
-ifeq (dmd,$(notdir $(dmd)))
- dflags_posix += -L-lphobos2
- dflags_windows += -m32mscoff
- ifeq (1,$(opt))
-  dflags += -O -g -gs -mcpu=avx
- else
-  dflags += -g -gs
- endif
- ifeq (1,$(debug))
-  dflags += -debug
-  dflags += -checkaction=D
- endif
-endif
-
-ifeq (ldc2,$(notdir $(dmd)))
- dflags += --link-defaultlib-shared
- dflags_windows += -m32
- ifeq (1,$(opt))
-  dflags += --O2 -g --enable-inlining=false --frame-pointer=all --mcpu=bdver3 --mattr=-bmi,-xop
-  dflags_posix += --linker=lld
- else
-  dflags += --O0 -g --disable-linker-strip-dead --frame-pointer=all --mcpu=bdver3 --mattr=-bmi,-xop
-  dflags_posix += --linker=lld
- endif
- ifeq (1,$(debug))
-  dflags += --d-debug
-  dflags += -checkaction=D
- endif
-endif
-
-ifeq (1,$(opt))
- dflags_posix += -L-O2 -L--gc-sections -L--hash-style=gnu
- dflags_windows += -L/opt:icf -L/opt:ref
-else
- dflags_posix += -L-O0 -L--no-gc-sections -L--hash-style=gnu
- dflags_windows += -L/opt:noicf -L/opt:noref
-endif
-
-.PHONY: dsp_winamp.so
-dsp_winamp.so:
-	$(dmd) -i -shared $(dflags) $(dflags_posix) $(mydflags) -mv=ddw=src -mv=misclib=src/common/misclib src/plugin/main.d -of=$@ && $(size) $@
-
-.PHONY: ddw-host-d.exe
-ddw-host-d.exe:
-	wine $(dmd) -i $(dflags) $(dflags_windows) $(mydflags) -mv=ddw=src -mv=misclib=src/common/misclib src/host/entry.d -Lntdll.lib -Luser32.lib -of=$@ && $(size) $@
-
-watchpl:
-	find src/ -name '*.[cd]' | entr -cr ttl make -s plugin
-watchhst:
-	find src/ -name '*.[cd]' | entr -cr ttl make -s host
-
-test: testpl testhost
-
-testpl:
-	$(dmd) -i -unittest -main $(dflags) $(dflags_posix) -checkaction=D $(mydflags) -mv=ddw=src -mv=misclib=src/common/misclib src/plugin/main.d -of=unittest && ./unittest
-
-testhst:
-	wine $(dmd) -i -unittest $(dflags) $(dflags_windows) -checkaction=D $(mydflags) -mv=ddw=src -mv=misclib=src/common/misclib src/host/entry.d -Lntdll.lib -Luser32.lib -of=unittest.exe && wine ./unittest.exe
+test: testplugin testhost
 
 install:
-	@cp -v dsp_winamp.so ~/.local/lib/deadbeef/dsp_winamp.so.tmp; \
+	@mkdir -pv ~/.local/lib/deadbeef; \
+	cp -v dsp_winamp.so ~/.local/lib/deadbeef/dsp_winamp.so.tmp; \
 	mv -v ~/.local/lib/deadbeef/dsp_winamp.so.tmp ~/.local/lib/deadbeef/dsp_winamp.so; \
+	mkdir -pv ~/.local/bin; \
 	cp -v ddw-host-d.exe ~/.local/bin/ddw-host-d.exe.tmp; \
 	mv -v ~/.local/bin/ddw-host-d.exe.tmp ~/.local/bin/ddw-host-d.exe
 
-# dmd 2.098.1, ldc 1.28.1:
-# - unwrap this typedef: typedef struct DB_output_s DB_output_t;
-#   https://issues.dlang.org/show_bug.cgi?id=22625
-c_deadbeef.c:
-	cpp -P -std=c11 -DDDB_API_LEVEL=10 -D__asm__\(x\)= -D__restrict= /usr/include/deadbeef/deadbeef.h >$@
-
 clean:
-	@rm -fv ./*.exe ./*.o ./*.obj ./*.pdb ./*.so ./unittest
+	@rm -fv ./*.exe ./*.i ./*.o ./*.obj ./*.so ./*.pdb
+
+## -----------------------------------------------------------------------------
+
+plugin: dsp_winamp.so
+
+PLUGIN_SRCS = \
+	c_deadbeef.i \
+	src/common/gc.d \
+	src/common/misclib/druntime/threadinit.d \
+	src/common/pipedata.d \
+	src/common/rtopts.d \
+	src/common/shmdata.d \
+	src/plugin/child.d \
+	src/plugin/chldinit.d \
+	src/plugin/chldproc.d \
+	src/plugin/deadbeef.d \
+	src/plugin/fmt.d \
+	src/plugin/main.d \
+	src/plugin/misc.d \
+	src/plugin/shm.d \
+	src/plugin/tickmain.d \
+
+dsp_winamp.so: $(PLUGIN_SRCS)
+	dmd -shared -O -g -inline -defaultlib=libphobos2.so $^ -of=$@ && size $@
+
+.PHONY: testplugin
+testplugin: $(PLUGIN_SRCS)
+	dmd -unittest -main -O -g -inline -defaultlib=libphobos2.so $^ -of=$@ && ./$@ && rm -f $@
+watchplugin:
+	ls $(PLUGIN_SRCS) | entr -cs 'make plugin'
+
+c_deadbeef.i:
+	cpp -DDDB_API_LEVEL=15 -D__asm__=asm -D__restrict= -I$$HOME/git -include deadbeef/deadbeef.h /dev/null >$@
+
+## -----------------------------------------------------------------------------
+
+host: ddw-host-d.exe
+
+HOST_SRCS = \
+	src/common/gc.d \
+	src/common/pipedata.d \
+	src/common/rtopts.d \
+	src/common/shmdata.d \
+	src/host/buf.d \
+	src/host/entry.d \
+	src/host/fmt.d \
+	src/host/main.d \
+	src/host/misc.d \
+	src/host/plugin.d \
+	src/host/plugproc.d \
+	src/host/plugload.d \
+	src/host/procmain.d \
+	src/host/shm.d \
+	src/host/winamp.d \
+	src/host/wndproc.d \
+
+ddw-host-d.exe: $(HOST_SRCS)
+	wine dmd -m32 -O -g -inline -L=user32.lib -L=ntdll.lib $^ -of=$@ && size $@
+
+.PHONY: testhost
+testhost: $(HOST_SRCS)
+	wine dmd -unittest -m32 -O -g -inline -L=user32.lib -L=ntdll.lib $^ -of=$@.exe && ./$@.exe && rm -f $@.exe
+watchhost:
+	ls $(HOST_SRCS) | entr -cs 'make host'
