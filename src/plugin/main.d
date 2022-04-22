@@ -32,6 +32,9 @@ struct Ddw
 	string dll;
 	ushort max_bps;
 }
+// check for https://issues.dlang.org/show_bug.cgi?id=22624 (fixed in v2.099.0)
+// ddb_dsp_context_t contains a bit field
+static assert(__VERSION__ >= 2099, "dmd version too old");
 
 bool ddw_has_dll(const(Ddw)* plugin)
 {
@@ -67,8 +70,7 @@ int ddw_next_needs_conversion(Ddw* plugin, const(ddb_waveformat_t)* curfmt)
 
 	if (nextctx != null)
 	{
-		// D bug: https://issues.dlang.org/show_bug.cgi?id=22623
-		if (cast(void*)nextctx.plugin != cast(void*)&plugindef)
+		if (nextctx.plugin != &plugindef)
 			rv |= NEED_32BIT|NEED_FLOAT;
 	}
 	else
@@ -96,26 +98,7 @@ ddb_dsp_context_t* dsp_winamp_open()
 	initForeignThread();
 	Ddw* plugin = new Ddw;
 
-	// D bug: https://issues.dlang.org/show_bug.cgi?id=22624
-	// emergency initialization as .init is currently broken
-	memset(plugin, 0, Ddw.sizeof);
-	plugin.host.pid = -1;
-	plugin.host.fds[0] = -1;
-	plugin.host.fds[1] = -1;
-	debug
-	{
-		assert(plugin.host.pid == -1);
-		assert(plugin.host.fds[0] == -1);
-		assert(plugin.host.fds[1] == -1);
-		assert(plugin.host.successes == 0);
-		assert(plugin.host.failures == 0);
-		assert(plugin.host.pl == null);
-		assert(plugin.dll == null);
-		assert(plugin.max_bps == 0);
-	}
-
-	// D bug: https://issues.dlang.org/show_bug.cgi?id=22623
-	plugin.ctx.plugin = cast(typeof(plugin.ctx.plugin))cast(void*)cast(DB_dsp_s*)&plugindef;
+	plugin.ctx.plugin = &plugindef;
 	plugin.ctx.enabled = 1;
 
 	plugin.max_bps = 16;
@@ -346,16 +329,7 @@ int dsp_winamp_start()
 {
 	if (!rt_init()) return 1;
 
-	// https://github.com/ldc-developers/ldc/issues/2782
-	version(LDC)
-	{
-		import c_deadbeef :
-			c_setvbuf = setvbuf,
-			c_stdout = stdout;
-		c_setvbuf(c_stdout, null, _IOLBF, 256);
-	}
-	else
-		setvbuf(stdout, null, _IOLBF, 256);
+	setvbuf(stdout, null, _IOLBF, 256);
 
 	return 0;
 }
