@@ -58,6 +58,7 @@ uint process_thread_main(void*)
 			lastfmt = curfmt;
 		}
 
+		// get the total size of data the plugins might prepend to the buffer
 		size_t restotal = 0;
 		foreach (ref pl; globals.plugins)
 		{
@@ -176,8 +177,8 @@ bool checkreadparams(const(Fmt)* fmt, ulong buffer_size)
 /**
  * process a format change
  * 
- * returns false if execution should be halted (a plugin with the "required"
- *  flag doesn't support the format)
+ * returns true if everything is ok, false if execution should be halted (a
+ *  plugin with the "required" flag doesn't support the format)
  */
 bool fmtchange(Plugin[] plugins, const(Fmt)* fmt)
 {
@@ -198,10 +199,14 @@ bool fmtchange(Plugin[] plugins, const(Fmt)* fmt)
 	return true;
 }
 
+/**
+ * check plugin compatibility on format change
+ */
 bool compat_update(Plugin* pl, const(Fmt)* fmt)
 {
-	const(char)* what = plugin_supports_format(pl, fmt);
-	pl.skip = (what != null);
+	const(char)* reason = plugin_supports_format(pl, fmt);
+
+	pl.skip = (reason != null);
 
 	if (pl.skip)
 	{
@@ -209,14 +214,14 @@ bool compat_update(Plugin* pl, const(Fmt)* fmt)
 		{
 			printf("error: required plugin %s doesn't support this %s, exiting\n",
 				pl.opts.dllname.ptr,
-				what);
+				reason);
 
 			return false;
 		}
 
 		printf("warning: %s doesn't support this %s, disabling it\n",
 			pl.opts.dllname.ptr,
-			what);
+			reason);
 	}
 
 	return true;

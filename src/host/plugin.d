@@ -24,19 +24,22 @@ enum MODULE_IDX_DEFAULT = -1;
 
 struct PluginOpts
 {
+	/// which module index to load from the dll
+	/// default: -1 (try both 0 and 1)
 	int module_idx = MODULE_IDX_DEFAULT;
+
 	uint process_min_frames = 576;
 	uint process_max_frames = 576;
 	uint process_frames_mult = 576;
 
-	bool nostretch = false;
-	bool noconf = false;
-	bool required = false;
+	bool nostretch = false; /// assume the plugin won't stretch sound
+	bool noconf = false;    /// skip calling `Config()` for the plugin
+	bool required = false;  /// exit instead of disabling on unsupported format
 
-	const(char)[] path;
-	const(char)[] dllname;
+	const(char)[] path;    /// full path to dll
+	const(char)[] dllname; /// filename of dll
 
-	uint[] rate;
-	uint[] bits;
-	uint[] ch;
+	uint[] rate; /// set to limit supported sample rates (e.g. `[44100, 48000]`)
+	uint[] bits; /// set to limit supported bit depths (e.g. `[16, 24]`)
+	uint[] ch;   /// set to limit supported channel counts (e.g. `[1, 2]`)
 }
