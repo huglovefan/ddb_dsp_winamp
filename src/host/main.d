@@ -2,11 +2,9 @@ module ddw.host.main;
 
 import core.stdc.stdio;
 import core.stdc.stdlib;
-
 import core.sys.windows.winbase;
 import core.sys.windows.windef;
 import core.sys.windows.winuser;
-
 import ddw.common.gc;
 import ddw.common.rtopts : rt_options;
 import ddw.common.shmdata;
@@ -18,6 +16,7 @@ import ddw.host.plugload;
 import ddw.host.procmain;
 import ddw.host.shm;
 import ddw.host.wndproc;
+import std.process;
 
 struct globals
 {
@@ -27,8 +26,8 @@ struct globals
 
 	Shm* shm;
 
-	HWND mainwin;
-	DWORD main_tid;
+	HWND  mainWindow;
+	DWORD mainThreadId;
 
 	static struct datapipe
 	{
@@ -40,54 +39,67 @@ struct globals
 }
 
 extern(C)
-int _Dmain(const(char)[][] args)
+int ddw_main(string[] args)
 {
 	HANDLE procthread;
 	int rv = 0;
 
-	globals.main_tid = GetCurrentThreadId();
+	globals.mainThreadId = GetCurrentThreadId();
 
-	//
-	// set up fds
-	//
+	/*
+	 * set up fds
+	 */
 	{
-		int nul = -1;
+		globals.datapipe.in_fd = dup(0);
+		globals.datapipe.out_fd = dup(1);
 
-		bool nok =
-			(nul = open("NUL", O_RDWR)) == -1 || // open NUL for redirecting
-			(globals.datapipe.in_fd = dup(STDIN_FILENO)) == -1 || // duplicate stdin to in_fd
-			(globals.datapipe.out_fd = dup(STDOUT_FILENO)) == -1 || // duplicate stdout to out_fd
-			dup2(nul, STDIN_FILENO) == -1 || // set stdin to the /dev/null fd
-			dup2(STDERR_FILENO, STDOUT_FILENO) == -1; // set stdout to stderr
+		int nul = open("NUL", O_RDWR);
+		int log = dup(2);
 
-		if (nul != -1)
-		{
-			close(nul);
-			nul = -1;
-		}
+		dup2(nul, 0);
+		dup2(log, 1);
+		dup2(log, 2);
 
-		if (nok)
-		{
-			printf("error: fd shuffle failed\n");
-			goto err;
-		}
+		close(nul);
+		close(log);
 
+		// disable buffering to have printfs show up immediately
+		// windows doesn't have line buffering so this is the next sane option
 		setvbuf(stdout, null, _IONBF, 0);
 		setvbuf(stderr, null, _IONBF, 0);
 
+		// don't mangle newlines
+		// old versions of wine didn't require this but newer ones do, so don't
+		//  remove this even if it appears to work without for you
 		_setmode(globals.datapipe.in_fd, _O_BINARY);
 		_setmode(globals.datapipe.out_fd, _O_BINARY);
 	}
 
-	//
-	// make these be null-terminated
-	//
-	foreach (i; 0..args.length) args[i] = args[i].gcdup;
+	// these should all
+	// - appear on their own lines
+	// - be written to stderr
+	static if (0)
+	{
+		{ write_full(1, "write1\n".ptr, 7); }
+		{ write_full(2, "write2\n".ptr, 7); }
+		{ import core.stdc.stdio; printf("printf test\n"); }
+		{ import core.stdc.stdio; fprintf(stdout, "fprintf stdout test\n"); }
+		{ import core.stdc.stdio; fprintf(stderr, "fprintf stderr test\n"); }
+		{ import std.stdio; writeln("writeln test"); }
+		{ import std.stdio; stdout.writeln("stdout.writeln test"); }
+		{ import std.stdio; stderr.writeln("stderr.writeln test"); }
+	}
 
-	//
-	// open shm file
-	//
-	if (char* shmpath = getenv("DDW_SHM_NAME"))
+	/*
+	 * make these be null-terminated
+	 */
+	foreach (ref arg; args)
+		arg = arg.gcdup;
+
+	/*
+	 * open shm file
+	 */
+	if (string shmpath = environment.get("DDW_SHM_NAME"))
 	{
 		globals.shm = cast(Shm*)shmnew(shmpath, Shm.sizeof);
 		if (!globals.shm)
@@ -98,82 +110,85 @@ int _Dmain(const(char)[][] args)
 		printf("warning: DDW_SHM_NAME not set\n");
 	}
 
-	//
-	// create IPC message window
-	// https://stackoverflow.com/a/4081383
-	//
+	/*
+	 * create IPC message window
+	 * https://stackoverflow.com/a/4081383
+	 */
 	{
-		WNDCLASSEX wx = {
+		enum className = "Winamp v1.x";
+
+		WNDCLASSEX windowClass = {
 			cbSize: WNDCLASSEX.sizeof,
 			lpfnWndProc: (globals.shm) ? &WindowProc : &DefWindowProc,
 			hInstance: GetModuleHandle(null),
-			lpszClassName: "Winamp v1.x",
+			lpszClassName: className,
 		};
-		if (RegisterClassEx(&wx) == 0)
+		if (!RegisterClassEx(&windowClass))
 		{
 			PrintError("RegisterClassEx");
 			goto err;
 		}
 
-		globals.mainwin = CreateWindowEx(
+		globals.mainWindow = CreateWindowEx(
 			0,
-			wx.lpszClassName,
+			className,
 			"Winamp",
 			0,
 			0, 0, 0, 0,
 			HWND_MESSAGE,
 			null,
-			wx.hInstance,
+			GetModuleHandle(null),
 			null);
-		if (globals.mainwin == null)
+		if (!globals.mainWindow)
 		{
 			PrintError("CreateWindowEx");
 			goto err;
 		}
 	}
 
-	//
-	// ancient ritual
-	//
+	/*
+	 * initialize message queue, or something
+	 * from: https://docs.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-postthreadmessagea#remarks
+	 */
 	{
 		MSG tmp;
 		PeekMessage(&tmp, null, 0, 0, PM_NOREMOVE);
 	}
 
-	//
-	// load plugins
-	//
+	/*
+	 * load plugins
+	 */
 	globals.plugins = new Plugin[args.length-1];
-	foreach (i; 1..args.length)
+	foreach (i, ref pl; globals.plugins)
 	{
-		if (!new_plugin(args[i], &globals.plugins[i-1]))
+		if (!new_plugin(args[i+1], &pl))
 			goto err;
 	}
-	if (globals.plugins.length == 0)
+	if (!globals.plugins.length)
 	{
 		printf("it works\n");
 		goto err;
 	}
 
-	//
-	// start processing thread
-	//
+	/*
+	 * start processing thread
+	 */
 	procthread = CreateThread(
 		null,
 		16*1024*1024,
-		&process_thread_main,
+		&process_thread_entry,
 		null,
 		STACK_SIZE_PARAM_IS_A_RESERVATION,
 		null);
-	if (procthread == null)
+	if (!procthread)
 	{
 		PrintError("CreateThread");
 		goto err;
 	}
 
-	//
-	// call config() for plugins that need it
-	//
+	/*
+	 * call config() for plugins that need it
+	 */
 	foreach (ref pl; globals.plugins)
 	{
 		if (pl.opts.noconf)
@@ -181,8 +196,6 @@ int _Dmain(const(char)[][] args)
 			pl.confdone = true;
 			continue;
 		}
-
-		pl.confdone = false;
 
 		HANDLE confthread = CreateThread(
 			null,
@@ -192,55 +205,54 @@ int _Dmain(const(char)[][] args)
 			0,
 			null);
 
-		if (confthread == null)
+		if (!confthread)
 		{
 			PrintError("CreateThread");
 			pl.confdone = true;
 			continue;
 		}
 
-		CloseHandle(confthread);
+		CloseHandle(confthread); // same as pthread_detach()
 	}
 
-	//
-	// run main loop
-	//
+	/*
+	 * run main loop
+	 */
 	rv = mainloop();
 
-	//
-	// wait (2000ms) for the processing thread to exit
-	//
 Lout:
+	/*
+	 * wait (2000ms) for the processing thread to exit
+	 */
 	if (procthread)
 	{
 		if (WaitForSingleObject(procthread, 2000) != WAIT_OBJECT_0)
 		{
 			printf("failed to join processing thread in 2000ms\n");
-			_exit(1);
+			assert(0);
 		}
 
-		CloseHandle(procthread);
-		procthread = null;
+		CloseHandle(exchange(procthread, null));
 	}
 
-	while (globals.plugins.length != 0)
+	/*
+	 * unload plugins in reverse order
+	 */
+	foreach_reverse (ref pl; globals.plugins)
 	{
-		Plugin* pl = &globals.plugins[$-1];
-
+		// don't unload if it might still be calling Config()
 		if (pl.confdone)
 		{
 			pl.module_.Quit(pl.module_);
-			FreeLibrary(pl.dll);
+			FreeLibrary(exchange(pl.dll, null));
 		}
 
 		buf_free(&pl.buf);
-
-		globals.plugins = globals.plugins[0..$-1];
 	}
 
 	return rv;
 err:
-	if (rv == 0)
+	if (!rv)
 		rv = 1;
 
 	goto Lout;
@@ -252,20 +264,18 @@ private:
 
 // -----------------------------------------------------------------------------
 
-enum STDIN_FILENO = 0;
-enum STDOUT_FILENO = 1;
-enum STDERR_FILENO = 2;
-
 extern(C) int dup(int);
 extern(C) int dup2(int, int);
+extern(C) int open(scope const(char)*, int);
 extern(C) int close(int);
-extern(C) int open(const(char)*, int);
 
 // https://docs.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-createthread
 enum STACK_SIZE_PARAM_IS_A_RESERVATION = 0x00010000;
 
-// https://github.com/wine-mirror/wine/blob/80e2154/include/msvcrt/fcntl.h
+// https://github.com/wine-mirror/wine/blob/wine-7.0/include/msvcrt/fcntl.h#L15
 enum O_RDWR = 2;
+
+// -----------------------------------------------------------------------------
 
 extern(Windows)
 uint conf_thread_main(void* ud)
@@ -274,12 +284,6 @@ uint conf_thread_main(void* ud)
 	pl.module_.Config(pl.module_);
 	pl.confdone = true;
 	return 0;
-}
-
-noreturn _exit(int status)
-{
-	TerminateProcess(GetCurrentProcess(), status);
-	for (;;) abort();
 }
 
 // -----------------------------------------------------------------------------

@@ -1,67 +1,67 @@
 module ddw.host.shm;
 
 import core.stdc.stdio;
-
 import core.sys.windows.winbase;
 import core.sys.windows.windef;
 import core.sys.windows.ntdef;
-
 import ddw.host.misc;
+import std.exception;
+import std.utf;
 
-void* shmnew(const(char)* path, size_t sz)
+// -----------------------------------------------------------------------------
+
+void* shmnew(string path, size_t sz) nothrow
 {
-	//
-	// open the file in Z:\dev\shm
-	//
-	HANDLE File = CreateFileA(
-		path,
+	/*
+	 * open the file in Z:\dev\shm
+	 */
+	HANDLE file = CreateFile(
+		path.toUTF16z.assumeWontThrow,
 		GENERIC_READ|GENERIC_WRITE,
 		FILE_SHARE_READ|FILE_SHARE_WRITE,
 		null,
 		OPEN_EXISTING,
 		0,
 		null);
-	if (File == INVALID_HANDLE_VALUE)
+	if (file == INVALID_HANDLE_VALUE)
 	{
 		PrintError("CreateFile");
 		return null;
 	}
 	scope (exit)
 	{
-		if (File != INVALID_HANDLE_VALUE)
-			CloseHandle(File);
+		if (file != INVALID_HANDLE_VALUE)
+			CloseHandle(file);
 	}
 
-	//
-	// create some mapping (idk why this is done in two steps)
-	//
-	HANDLE Mapping = CreateFileMapping(
-		File,
+	/*
+	 * create some mapping (idk why this is done in two steps)
+	 */
+	HANDLE mapping = CreateFileMapping(
+		file,
 		null,
 		PAGE_READWRITE,
 		0,
 		0,
 		null);
-	if (Mapping == null)
+	if (!mapping)
 	{
 		PrintError("CreateFileMapping");
 		return null;
 	}
 	scope (exit)
 	{
-		if (Mapping != null)
-			CloseHandle(Mapping);
+		if (mapping)
+			CloseHandle(mapping);
 	}
 
-	//
-	// temporarily enable DEP to prevent the file from being mapped as
-	//  executable, which would fail if Z:\dev\shm is mounted noexec
-	//
-	// (DEP = data execution prevention, means we're smart enough that we don't
-	//  need automatic execute permissions on all mapped files)
-	//
-	// (it's not enabled by default in wine, maybe better that way for compatibility)
-	//
+	/*
+	 * temporarily enable DEP to prevent the file from being mapped as
+	 *  executable, which would fail if Z:\dev\shm is mounted noexec
+	 * 
+	 * (DEP = data execution prevention, means we're smart enough that we don't
+	 *  need automatic execute permissions on all mapped files)
+	 */
 	bool didEnableDEP = tryEnableDEP();
 	scope (exit)
 	{
@@ -69,43 +69,47 @@ void* shmnew(const(char)* path, size_t sz)
 			disableDEP();
 	}
 
-	//
-	// get the pointer from the mapping
-	//
-	// note: it's safe to close the mapping and file handle after this
-	//
-	LPVOID View = MapViewOfFile(
-		Mapping,
+	/*
+	 * get the pointer from the mapping
+	 * 
+	 * note: it's safe to close the mapping and file handle after this
+	 */
+	LPVOID view = MapViewOfFile(
+		mapping,
 		FILE_MAP_READ|FILE_MAP_WRITE,
 		0,
 		0,
 		sz);
-	if (View == null)
+	if (!view)
 	{
 		PrintError("MapViewOfFile");
 		return null;
 	}
 
-	return View;
+	return view;
 }
+
+// -----------------------------------------------------------------------------
+
+private:
 
 /**
  * enable Data Execution Prevention
  */
-bool tryEnableDEP()
+bool tryEnableDEP() nothrow
 {
-	LONG Value = MEM_EXECUTE_OPTION_DISABLE;
-	NTSTATUS Status = NtSetInformationProcess(
+	ULONG info = MEM_EXECUTE_OPTION_DISABLE;
+	NTSTATUS status = NtSetInformationProcess(
 		GetCurrentProcess(),
-		PROCESSINFOCLASS.ProcessExecuteFlags,
-		&Value,
-		Value.sizeof);
+		ProcessExecuteFlags,
+		&info,
+		info.sizeof);
 
-	if (Status >= 0) // NT_SUCCESS
+	if (NT_SUCCESS(status))
 		return true;
 	else
 	{
-		printf("NtSetInformationProcess: %s\n", NtStrError(Status));
+		printf("NtSetInformationProcess: %s\n", NtStrError(status));
 		return false;
 	}
 }
@@ -113,49 +117,43 @@ bool tryEnableDEP()
 /**
  * disable Data Execution Prevention
  */
-void disableDEP()
+void disableDEP() nothrow
 {
-	LONG Value = MEM_EXECUTE_OPTION_ENABLE;
-	NTSTATUS Status = NtSetInformationProcess(
+	ULONG info = MEM_EXECUTE_OPTION_ENABLE;
+	NTSTATUS status = NtSetInformationProcess(
 		GetCurrentProcess(),
-		PROCESSINFOCLASS.ProcessExecuteFlags,
-		&Value,
-		Value.sizeof);
+		ProcessExecuteFlags,
+		&info,
+		info.sizeof);
 
-	if (!(Status >= 0)) // NT_SUCCESS
-		printf("NtSetInformationProcess: %s\n", NtStrError(Status));
+	if (!NT_SUCCESS(status))
+		printf("NtSetInformationProcess: %s\n", NtStrError(status));
 }
 
+// -----------------------------------------------------------------------------
+
+/*
+ * undocumented windows things that aren't in druntime
+ */
+
+// https://github.com/wine-mirror/wine/blob/wine-7.0/include/winternl.h#L1575
 enum MEM_EXECUTE_OPTION_DISABLE = 0x01;
 enum MEM_EXECUTE_OPTION_ENABLE = 0x02;
 
-enum PROCESSINFOCLASS
+// https://github.com/wine-mirror/wine/blob/wine-7.0/include/winternl.h#L1524
+alias int PROCESSINFOCLASS;
+enum : PROCESSINFOCLASS
 {
-	ProcessExecuteFlags = 0x22,
+	ProcessExecuteFlags = 34,
 }
 
-version (CRuntime_Microsoft)
-{
-	extern(Windows) NTSTATUS NtSetInformationProcess(HANDLE, PROCESSINFOCLASS, PVOID, ULONG);
-}
-else
-{
-	alias extern(Windows) NTSTATUS function(HANDLE, PROCESSINFOCLASS, PVOID, ULONG) TNtSetInformationProcess;
-	__gshared TNtSetInformationProcess pNtSetInformationProcess;
+// https://github.com/wine-mirror/wine/blob/wine-7.0/dlls/ntdll/unix/process.c#L1509
+extern(Windows) NTSTATUS NtSetInformationProcess(HANDLE, PROCESSINFOCLASS, PVOID, ULONG) nothrow;
 
-	NTSTATUS NtSetInformationProcess(HANDLE arg1, PROCESSINFOCLASS arg2, PVOID arg3, ULONG arg4)
-	{
-		auto fn = pNtSetInformationProcess;
-		if (fn == null) goto load;
-ok:
-		return fn(arg1, arg2, arg3, arg4);
-load:
-		{
-			HANDLE ntdll = LoadLibrary("ntdll");
-			fn = cast(typeof(fn))GetProcAddress(ntdll, "NtSetInformationProcess");
-			pNtSetInformationProcess = fn;
-			CloseHandle(ntdll);
-			goto ok;
-		}
-	}
+// -----------------------------------------------------------------------------
+
+// druntime one is missing `nothrow`
+bool NT_SUCCESS(NTSTATUS status) nothrow
+{
+	return status >= 0;
 }

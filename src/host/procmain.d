@@ -3,15 +3,12 @@ module ddw.host.procmain;
 import core.stdc.errno;
 import core.stdc.stdint;
 import core.stdc.stdio;
-
 import core.sys.windows.winbase;
 import core.sys.windows.windef;
 import core.sys.windows.winuser;
-
 import core.atomic;
 import core.thread.osthread : rt_moduleTlsCtor, rt_moduleTlsDtor, thread_attachThis;
 import core.thread.threadbase : thread_detachThis;
-
 import ddw.common.pipedata;
 import ddw.host.buf;
 import ddw.host.fmt;
@@ -21,25 +18,37 @@ import ddw.host.plugin;
 import ddw.host.plugload;
 import ddw.host.plugproc;
 
-extern(Windows)
-uint process_thread_main(void*)
-{
-	try
-	{ // ---
+// -----------------------------------------------------------------------------
 
+void process_thread_main()
+{
 	Buf data;
 	Buf tmp;
 	Fmt lastfmt;
-	int thread_rv = 0;
-
-	thread_attachThis();
-	rt_moduleTlsCtor();
+	bool normalExit;
 
 	for (;;)
 	{
-		processing_request req = void;
+		/*
+		 * read header
+		 */
+
+		processing_request req;
 		if (!read_full(globals.datapipe.in_fd, &req, req.sizeof))
-			goto read1fail;
+		{
+			if (!errno)
+			{
+				printf("process thread got EOF\n");
+				normalExit = true;
+				break;
+			}
+			perror("read");
+			break;
+		}
+
+		/*
+		 * make format, check and verify it
+		 */
 
 		Fmt curfmt = {
 			rate: req.samplerate,
@@ -48,18 +57,22 @@ uint process_thread_main(void*)
 		};
 
 		if (!checkreadparams(&curfmt, req.buffer_size))
-			goto err;
+			break;
 
 		if (curfmt != lastfmt)
 		{
 			if (!fmtchange(globals.plugins, &curfmt))
-				goto err;
+				break;
 
 			lastfmt = curfmt;
 		}
 
+		/*
+		 * prepare buffer
+		 */
+
 		// get the total size of data the plugins might prepend to the buffer
-		size_t restotal = 0;
+		size_t restotal;
 		foreach (ref pl; globals.plugins)
 		{
 			if (!pl.skip)
@@ -67,75 +80,103 @@ uint process_thread_main(void*)
 		}
 
 		buf_clear(&data);
+		buf_clear(&tmp);
+
 		buf_prepare_append(&data, restotal + cast(size_t)req.buffer_size);
 		buf_init_reserved(&data, restotal);
-		buf_register_append(&data, cast(size_t)req.buffer_size);
+
+		/*
+		 * read data
+		 */
+
 		if (!read_full(globals.datapipe.in_fd, data.p, cast(size_t)req.buffer_size))
-			goto readerr;
+		{
+			if (errno != 0)
+				perror("read");
+			else
+				printf("read: unexpected EOF\n");
+			break;
+		}
+		buf_register_append(&data, cast(size_t)req.buffer_size);
+
+		/*
+		 * process!
+		 */
 
 		plugin_process_all(globals.plugins, &curfmt, &data, &tmp);
+
+		/*
+		 * write header
+		 */
 
 		processing_response res = {
 			buffer_size: data.sz,
 		};
 		if (!write_full(globals.datapipe.out_fd, &res, res.sizeof))
-			goto writeerr;
+		{
+			perror("write");
+			break;
+		}
+
+		/*
+		 * write data
+		 */
 
 		if (data.sz != 0)
 		{
 			if (!write_full(globals.datapipe.out_fd, data.p, data.sz))
-				goto writeerr;
+			{
+				perror("write");
+				break;
+			}
 
 			buf_clear(&data);
 		}
 	}
-Lout:
+
 	buf_free(&data);
 	buf_free(&tmp);
-	PostThreadMessage(globals.main_tid, WM_QUIT,
-		/* wParam */ thread_rv,
-		/* lParam */ 0);
-	rt_moduleTlsDtor();
-	thread_detachThis();
-	return 0;
-err:
-	thread_rv = 1;
-	goto Lout;
-read1fail:
-	if (errno != 0)
-		goto readerr;
-	printf("process thread got EOF\n");
-	goto Lout;
-writeerr:
-	if (errno != 0)
-		perror("write");
-	else
-		printf("write: unexpected EOF\n");
-	goto err;
-readerr:
-	if (errno != 0)
-		perror("read");
-	else
-		printf("read: unexpected EOF\n");
-	goto err;
 
-	} // ---
+	int rv = (normalExit) ? 0 : 1;
+
+	PostThreadMessage(globals.mainThreadId, WM_QUIT,
+		/* wParam */ rv,
+		/* lParam */ 0);
+}
+
+extern(Windows)
+uint process_thread_entry(void*)
+{
+	try
+	{
+		thread_attachThis();
+		rt_moduleTlsCtor();
+		process_thread_main(); // <--
+		rt_moduleTlsDtor();
+		thread_detachThis();
+		return 0;
+	}
 	catch (Throwable e)
 	{
-		Plugin* pl = cast(Plugin*)procplug.atomicLoad();
-		if (pl != null)
+		if (Plugin* pl = cast(Plugin*)procplug.atomicLoad())
 			printf("fatal error: %s threw during processing\n",
 				pl.opts.dllname.ptr);
 		else
 			printf("fatal error: uncaught exception in processing thread\n");
-		while (e)
+
+		// print exception chain
+		int limit = 10;
+		while (e && limit --> 0)
 		{
-			string s = e.toString();
-			printf("%.*s", cast(int)s.length, s.ptr);
+			e.toString((in char[] s)
+			{
+				printf("%.*s", cast(int)s.length, s.ptr);
+			});
+			printf("\n");
 			e = e.next;
 		}
-		TerminateProcess(GetCurrentProcess(), 1);
-		assert(0);
+
+		_exit(1);
 	}
 }
 

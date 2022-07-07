@@ -10,15 +10,15 @@ nothrow:
 
 struct Buf
 {
-	void* p;
-	size_t sz; /// used size
+	void*  p;
+	size_t sz;  /// used size
 	size_t cap; /// total capacity
 
-	//
-	// how much "reserved space" there is to the left of `p`
-	// this isn't included in the other struct members so be careful
-	// the real allocated size is `cap+res`, and the real pointer is `p-res`
-	//
+	/**
+	 * how much "reserved space" there is to the left of `p`
+	 * this isn't included in the other struct members so be careful
+	 * the real allocated size is `cap+res`, the real pointer is `p-res`
+	 */
 	size_t res;
 }
 
@@ -35,28 +35,23 @@ enum buf_bound
 
 void buf_prepare_capacity(Buf* self, size_t req)
 {
-	void* realp;
-	size_t realcap;
-	void* newp;
-	size_t newcap;
-
 	// already have that much?
 	if (self.cap >= req)
 		return;
 
 	// get the real allocated pointer and capacity
-	realp = (self.p != null) ? self.p-self.res : null;
-	realcap = self.cap+self.res;
+	void* realp = (self.p) ? self.p-self.res : null;
+	size_t realcap = self.cap+self.res;
 
 	// include the reserved space when calculating the new allocation size
 	req += self.res;
 
-	newcap = (realcap != 0) ? realcap : 512;
+	size_t newcap = (realcap != 0) ? realcap : 512;
 	while (newcap < req)
 		newcap *= 2;
 
-	newp = realloc(realp, newcap);
-	assert(newp != null);
+	void* newp = realloc(realp, newcap);
+	assert(newp);
 
 	self.p = newp+self.res;
 	self.cap = newcap-self.res;
@@ -84,7 +79,7 @@ void buf_append(Buf* self, const(void)* p, size_t sz)
 
 void buf_clear(Buf* self)
 {
-	if (self.p != null)
+	if (self.p)
 		self.p -= self.res; // rewind to the original pointer
 
 	self.sz = 0;
@@ -94,7 +89,7 @@ void buf_clear(Buf* self)
 
 void buf_free(Buf* self)
 {
-	if (self.p != null)
+	if (self.p)
 		free(self.p-self.res); // free the original pointer
 
 	*self = Buf.init;
@@ -129,19 +124,19 @@ buf_bound buf_boundscheck_read(const(Buf)* self, const(void)* p, size_t sz) pure
 	buf_bound flags = buf_bound.BUF_NONE;
 	size_t offset;
 
-	if (p == null)
-		goto Lout;
+	if (!p)
+		goto end;
 
-	if (self.p == null)
-		goto Lout;
+	if (!self.p)
+		goto end;
 
 	if (!(p >= self.p && p <= self.p+self.sz-!!sz))
-		goto Lout;
+		goto end;
 
 	offset = cast(size_t)(p-self.p);
 
 	if (offset+sz > self.sz)
-		goto Lout;
+		goto end;
 
 	flags |= buf_bound.BUF_TRUE;
 
@@ -151,31 +146,29 @@ buf_bound buf_boundscheck_read(const(Buf)* self, const(void)* p, size_t sz) pure
 	if (p+sz == self.p+self.sz)
 		flags |= buf_bound.BUF_RIGHTEDGE;
 
-Lout:
+end:
 	return flags;
 }
 
-//
 // same as buf_boundscheck_read() but checks are with self.cap instead of self.sz
-//
 buf_bound buf_boundscheck_write(const(Buf)* self, const(void)* p, size_t sz) pure
 {
 	buf_bound flags = buf_bound.BUF_NONE;
 	size_t offset;
 
-	if (p == null)
-		goto Lout;
+	if (!p)
+		goto end;
 
-	if (self.p == null)
-		goto Lout;
+	if (!self.p)
+		goto end;
 
 	if (!(p >= self.p && p <= self.p+self.cap-!!sz))
-		goto Lout;
+		goto end;
 
 	offset = cast(size_t)(p-self.p);
 
 	if (offset+sz > self.cap)
-		goto Lout;
+		goto end;
 
 	flags |= buf_bound.BUF_TRUE;
 
@@ -185,7 +178,7 @@ buf_bound buf_boundscheck_write(const(Buf)* self, const(void)* p, size_t sz) pur
 	if (p+sz == self.p+self.cap)
 		flags |= buf_bound.BUF_RIGHTEDGE;
 
-Lout:
+end:
 	return flags;
 }
 

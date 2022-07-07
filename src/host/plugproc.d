@@ -3,11 +3,8 @@ module ddw.host.plugproc;
 import core.stdc.stdio;
 import core.stdc.stdlib;
 import core.stdc.string;
-
 import core.atomic;
-
 import std.algorithm : min;
-
 import ddw.host.buf;
 import ddw.host.fmt;
 import ddw.host.misc;

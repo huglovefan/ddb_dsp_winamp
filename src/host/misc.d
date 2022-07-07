@@ -12,6 +12,15 @@ nothrow:
 
 // -----------------------------------------------------------------------------
 
+T exchange(T)(ref T var, T newval)
+{
+	T oldval = var;
+	var = newval;
+	return oldval;
+}
+
+// -----------------------------------------------------------------------------
+
 inout(char)* strchrnul(inout(char)* s, int c)
 {
 	while (*s && *s != c) s++;
@@ -22,10 +31,10 @@ inout(char)* strchrnul(inout(char)* s, int c)
 
 inout(char)[] superbasename(inout(char)[] path)
 {
-	size_t sp = 0;
-	foreach_reverse (i; 0..path.length)
+	size_t sp;
+	foreach_reverse (i, c; path)
 	{
-		if (path.ptr[i] == '/' || path.ptr[i] == '\\')
+		if (c == '/' || c == '\\')
 		{
 			sp = i+1;
 			break;
@@ -49,25 +58,15 @@ unittest
 
 // -----------------------------------------------------------------------------
 
-// https://github.com/wine-mirror/wine/blob/master/dlls/msvcrt/file.c
-private extern(C) int write(int fd, const(void)*, uint);
-private extern(C) int read(int fd, void*, uint);
-
-// success                 -> true
-// EOF with nothing read   -> false, errno = 0
-// EOF with partial read   -> false, errno = EIO
-// error with nothing read -> false, errno set
-// error with partial read -> false, errno set
-
 bool read_full(int fd, void* p, size_t sz)
 {
 	const void* base = p;
 
 	for (;;)
 	{
-		int rv = read(fd, p, sz);
+		uint rv = read(fd, p, (sz <= int.max) ? sz : int.max);
 
-		if (cast(size_t)rv == sz)
+		if (rv == sz)
 			return true;
 
 		if (rv == 0)
@@ -79,50 +78,41 @@ bool read_full(int fd, void* p, size_t sz)
 		if (rv == -1)
 			return false;
 
-		sz -= cast(size_t)rv;
-		p += cast(size_t)rv;
+		sz -= rv;
+		p += rv;
 	}
 }
 
 bool write_full(int fd, const(void)* p, size_t sz)
 {
-	const void* base = p;
-
 	for (;;)
 	{
-		int rv = write(fd, p, sz);
+		uint rv = write(fd, p, (sz <= int.max) ? sz : int.max);
 
-		if (cast(size_t)rv == sz)
+		if (rv == sz)
 			return true;
 
 		if (rv == 0)
 		{
-			errno = (p != base) ? EIO : 0;
+			errno = EIO;
 			return false;
 		}
 
 		if (rv == -1)
 			return false;
 
-		sz -= cast(size_t)rv;
-		p += cast(size_t)rv;
+		sz -= rv;
+		p += rv;
 	}
 }
 
-// -----------------------------------------------------------------------------
-
-private extern(Windows) ULONG RtlNtStatusToDosError(NTSTATUS);
-
-const(char)* NtStrError(NTSTATUS Status)
+private
 {
-	version(CRuntime_Microsoft)
-		return StrError(RtlNtStatusToDosError(Status));
-	else
-	{
-		__gshared static char[24] buf = 0;
-		snprintf(buf.ptr, buf.length, "NTSTATUS %d", Status);
-		return buf.ptr;
-	}
+	// https://github.com/wine-mirror/wine/blob/wine-7.0/dlls/msvcrt/file.c#L2927
+	extern(C) int read(int fd, void*, uint);
+
+	// https://github.com/wine-mirror/wine/blob/wine-7.0/dlls/msvcrt/file.c#L3426
+	extern(C) int write(int fd, const(void)*, uint);
 }
 
 // -----------------------------------------------------------------------------
@@ -130,7 +120,7 @@ const(char)* NtStrError(NTSTATUS Status)
 PCSTR StrError(DWORD Code)
 {
 	DWORD Length;
-	__gshared static CHAR[128] Buf = 0;
+	static CHAR[128] Buf = 0;
 
 	Length = FormatMessageA(
 		FORMAT_MESSAGE_FROM_SYSTEM,
@@ -160,4 +150,51 @@ VOID PrintError(PCSTR What)
 		printf("%s: %s\n", What, se);
 	else
 		printf("%s\n", se);
+}
+
+// -----------------------------------------------------------------------------
+
+const(char)* NtStrError(NTSTATUS status)
+{
+	ULONG error = RtlNtStatusToDosError(status);
+
+	if (error == ERROR_MR_MID_NOT_FOUND && status != STATUS_MESSAGE_NOT_FOUND)
+	{
+		// couldn't convert the error code
+		// return a stringified version of the ntstatus number
+		static char[32] buf = 0;
+		snprintf(buf.ptr, buf.length, "NTSTATUS %d", status);
+		return buf.ptr;
+	}
+
+	return StrError(error);
+}
+
+private
+{
+	// https://github.com/wine-mirror/wine/blob/wine-7.0/dlls/ntdll/error.c#L66
+	extern(Windows) ULONG RtlNtStatusToDosError(NTSTATUS);
+
+	// https://github.com/wine-mirror/wine/blob/wine-7.0/include/winerror.h#L329
+	enum ERROR_MR_MID_NOT_FOUND = 317;
+
+	// https://github.com/wine-mirror/wine/blob/wine-7.0/include/ntstatus.h#L475
+	enum STATUS_MESSAGE_NOT_FOUND = 0xc0000109;
+}
+
+// -----------------------------------------------------------------------------
+
+/**
+ * exit without running any destructors or other cleanup code
+ * 
+ * compared to exit(), this skips any cleanup done by the C runtime, which
+ *  might include flusing stdio buffers and running atexit() handlers
+ */
+noreturn _exit(int status)
+{
+	TerminateProcess(GetCurrentProcess(), status);
+	// should be unreachable, but crash if we somehow get here
+	asm nothrow @nogc { ud2; }
+	// satisfy noreturn
+	assert(0);
 }
