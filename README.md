@@ -45,8 +45,7 @@ Now with a clicky GUI:
     libvorbis (BSD-3-Clause)
 -   `src/host/winamp.hpp` and `src/host/wndproc.[ch]pp` use definitions
     from the Winamp&nbsp;SDK by Justin&nbsp;Frankel and
-    Nullsoft,&nbsp;Inc. The SDK is licensed under a custom BSD-style
-    license.
+    Nullsoft,&nbsp;Inc. (Zlib)
 -   A few functions were entirely copied from LLM output. Use
     <CODE>grep&nbsp;chatgpt</CODE> to find them. There are also others
     where an LLM wrote only part of the code, but listing every instance
