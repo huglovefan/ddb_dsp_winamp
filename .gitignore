@@ -1,8 +1,4 @@
-*.c
 *.exe
-*.i
-*.o
-*.obj
-*.pdb
 *.so
-README
+/.lib/
+/imgui.ini
