@@ -108,14 +108,34 @@ static void dsp_winamp_get_param(
 static DB_dsp_t plugindef = {
 	.plugin = {
 		.type = DB_PLUGIN_DSP,
-		.api_vmajor = DB_API_VERSION_MAJOR,
-		.api_vminor = DB_API_VERSION_MINOR,
+		.api_vmajor = 1,
+		.api_vminor = DDB_API_LEVEL,
 		.id = "dsp_winamp",
 		.name = "Winamp DSP",
 		.descr =
 		    "Adapter that allows using DSP plugins from"
 		    " Winamp.",
-		.copyright = "",
+		.copyright =
+"Winamp DSP adapter for DeaDBeeF\n"
+"\n"
+"For third-party acknowledgements and licenses, see:\n"
+"<https://github.com/huglovefan/ddb_dsp_winamp>\n"
+"\n"
+"Copyright (C) 2019-2026 huglovefan <https://github.com/huglovefan>\n"
+"\n"
+"This program is free software: you can redistribute it and/or modify\n"
+"it under the terms of the GNU Lesser General Public License as\n"
+"published by the Free Software Foundation, version 3.\n"
+"\n"
+"This program is distributed in the hope that it will be useful, but\n"
+"WITHOUT ANY WARRANTY; without even the implied warranty of\n"
+"MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU\n"
+"Lesser General Public License for more details.\n"
+"\n"
+"You should have received a copy of the GNU Lesser General Public\n"
+"License along with this program. If not, see\n"
+"<https://www.gnu.org/licenses/>.\n"
+"",
 		.website =
 		    "https://github.com/huglovefan/ddb_dsp_winamp",
 		.connect = &dsp_winamp_connect,
