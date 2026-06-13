@@ -36,25 +36,23 @@ Now with a clicky GUI:
 
 ## Credit and copyright
 
-**Code:**
+Original code is licensed as `LGPL-3.0-only`, unless a license header
+says otherwise. Third-party code used is listed below.
 
--   [Dear ImGui by Omar&nbsp;Cornut and contributors][imgui] (MIT)
+-   `3p/imgui`: [Dear ImGui by Omar&nbsp;Cornut and contributors][imgui]
+    (MIT)
 -   `src/crc32.[ch]`: [CRC32 routines by Ayman&nbsp;El&nbsp;Didi][crc]
-    (CC0)
+    (CC0-1.0)
 -   `src/float.h`: lifted from DeaDBeeF, originally from Xiph.Org
     libvorbis (BSD-3-Clause)
--   `src/host/winamp.hpp` uses definitions from the Winamp&nbsp;SDK by
-    Justin&nbsp;Frankel and Nullsoft,&nbsp;Inc. (Zlib)
--   A few functions were entirely copied from LLM output. Use
-    <CODE>grep&nbsp;chatgpt</CODE> to find them. There are also others
-    where an LLM wrote only part of the code, but listing every instance
-    of LLM assistance would be pointless.
--   Likewise: <CODE>grep&nbsp;stackoverflow</CODE>.
-
-**Other mentions:**
-
--   [Wine](https://www.winehq.org/) is used to run the stuff on Linux.
-    None of this would work without it.
+-   `src/host/winamp.hpp`: based on headers from the Winamp 5.55 SDK and
+    earlier by Justin&nbsp;Frankel and Nullsoft,&nbsp;Inc. (Zlib)
 
 [imgui]: https://github.com/ocornut/imgui
 [crc]: https://github.com/aeldidi/crc32
+
+Functions or files with a comment that mentions "chatgpt" originate from
+LLM output.
+
+**Winamp** is a trademark of its respective owners. No affiliation or
+endorsement is claimed.
