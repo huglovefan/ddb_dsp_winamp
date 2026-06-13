@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: BSD-3-Clause */
 #pragma once
 
 /* this file is based on deadbeef's fastftoi.h, which has the following

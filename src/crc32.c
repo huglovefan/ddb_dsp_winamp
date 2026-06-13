@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: CC0-1.0 */
 /*
  *    crc32.c - calculate crc32 checksums of data
  *

@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: Zlib */
 #pragma once
 
 #include <windef.h>
