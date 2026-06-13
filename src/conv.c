@@ -26,20 +26,6 @@
 # define REGPARM
 #endif
 
-#if !defined(__GNUC__)
-/* https://stackoverflow.com/a/69589530 */
-static bool __builtin_add_overflow(int32_t a, int32_t b, int32_t *r)
-{
-	int32_t sum;
-
-	sum = (uint32_t)a + b;
-	if (a >= 0 ? sum < b : sum > b)
-		return true;
-	*r = a + b;
-	return false;
-}
-#endif
-
 static inline int32_t min_s32(int32_t a, int32_t b)
 {
 	if (unlikely(b < a))
