@@ -485,19 +485,6 @@ err:
 	return false;
 }
 
-/* https://stackoverflow.com/a/35350573 */
-template <typename Container> 
-bool contains(
-	const Container                      &container,
-	const typename Container::value_type &element) 
-{
-	for (auto x : container)
-		if (x == element)
-			return true;
-
-	return false;
-}
-
 /**
  * check if a plugin supports a format given its parameters
  * 
@@ -508,9 +495,21 @@ bool contains(
  */
 const char *plugin_supports_format(const Plugin *pl, const AFMT *fmt)
 {
-	if (!pl->opts.rate.empty() &&
-	    !contains(pl->opts.rate, fmt->rate))
-		return "sample rate";
+	size_t i;
+	bool found;
+
+	if (pl->opts.rate.size())
+	{
+		found = false;
+		for (i = 0; i != pl->opts.rate.size(); i++)
+			if (pl->opts.rate[i] == fmt->rate)
+			{
+				found = true;
+				break;
+			}
+		if (!found)
+			return "sample rate";
+	}
 
 	return nullptr;
 }
