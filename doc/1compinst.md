@@ -63,6 +63,8 @@ DeaDBeeF will pick it up from. The host executable is copied to
 
     make install
 
+After this step, you can proceed on to [Basic usage](./2basic.md).
+
 ## Updating
 
 (needs testing)
