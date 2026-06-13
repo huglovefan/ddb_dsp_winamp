@@ -9,25 +9,6 @@
 #include <fcntl.h>
 #include "../conv.h"
 
-/* https://stackoverflow.com/a/323302 */
-/* Robert Jenkins' 96 bit Mix Function */
-static unsigned int mix(
-	unsigned int a,
-	unsigned int b,
-	unsigned int c)
-{
-	a=a-b; a=a-c; a=a^(c >> 13);
-	b=b-c; b=b-a; b=b^(a << 8);
-	c=c-a; c=c-b; c=c^(b >> 13);
-	a=a-b; a=a-c; a=a^(c >> 12);
-	b=b-c; b=b-a; b=b^(a << 16);
-	c=c-a; c=c-b; c=c^(b >> 5);
-	a=a-b; a=a-c; a=a^(c >> 3);
-	b=b-c; b=b-a; b=b^(a << 10);
-	c=c-a; c=c-b; c=c^(b >> 15);
-	return c;
-}
-
 static unsigned long long get_entropy(void)
 {
 	union {
@@ -46,12 +27,9 @@ static unsigned long long get_entropy(void)
 
 	if (fd < 0 || readrv != sizeof(entropy))
 	{
-		entropy.u = mix(clock(), time(NULL), getpid());
-		entropy.u <<= 32;
-		entropy.u |= mix(
-		    (uintptr_t)&get_entropy,
-		    (uintptr_t)&entropy,
-		    (uintptr_t)pthread_self());
+		fprintf(stderr,
+		    "internal error: unable to get entropy\n");
+		abort();
 	}
 
 	return entropy.u;
