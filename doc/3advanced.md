@@ -43,7 +43,8 @@ played. You don't want to shock your ears with it.
     These options impose limits on the size of the audio buffer passed
     to `ModifySamples()`.
 
-    <P>
+    <P></P>
+
     -   `procmin`: Must have **at least** this many audio frames.
     -   `procmax`: Must have **at most** this many audio frames.
     -   `procmult`: The number of frames must be a multiple of this
