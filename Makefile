@@ -78,45 +78,6 @@ watchplugin:
 
 ## ---------------------------------------------------------------------
 
-# ongoing experiment
-
-host2: wadsp_host.exe
-
-host2_OBJS = \
-	.lib/host2/src/host2/entry.o \
-	.lib/host2/src/host2/main.o \
-	.lib/host2/src/host2/gui.o \
-
-host2_CC = i686-w64-mingw32-gcc-win32 -municode -mwindows
-
-host2_WINDRES = i686-w64-mingw32-windres
-
-host2_CFLAGS += -std=c99
-
-host2_CFLAGS += -O2 -g $(warns) $(cwarns)
-host2_CFLAGS += -DWIN32_LEAN_AND_MEAN
-
-#~ host2_CFLAGS += -Wtraditional
-host2_CFLAGS += -Wmissing-parameter-type
-host2_CFLAGS += -Wdeclaration-missing-parameter-type
-host2_CFLAGS += -pedantic
-
-host2_LDFLAGS += -Wl,--no-insert-timestamp
-
-.lib/host2/%.o: %.c
-	mkdir -p $(dir $@)
-	$(host2_CC) -c $< $(host2_CFLAGS) -o $@
-
-.lib/host2/%.o: %.rc
-	mkdir -p $(dir $@)
-	$(host2_WINDRES) $< $@
-
-wadsp_host.exe: $(host2_OBJS)
-	$(host2_CC) $^ $(host2_LDFLAGS) -o $@.tmp $(host2_LIBS)
-	mv -f $@.tmp $@
-
-## ---------------------------------------------------------------------
-
 host: ddw-host-d.exe
 
 host_OBJS = \
