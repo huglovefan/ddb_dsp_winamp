@@ -263,7 +263,7 @@ class host:
 	def __init__(self, plugins: List[str]) -> None:
 		self.p = subprocess.Popen(
 		    ['wine',
-		     'ddw-host-d.exe']+plugins,
+		     'wadsp_host.exe']+plugins,
 		    stdin=subprocess.PIPE,
 		    stdout=subprocess.PIPE)
 

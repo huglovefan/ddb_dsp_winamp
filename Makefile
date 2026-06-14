@@ -6,12 +6,12 @@ install:
 	cp -v dsp_winamp.so ~/.local/lib/deadbeef/dsp_winamp.so.tmp; \
 	mv -v ~/.local/lib/deadbeef/dsp_winamp.so.tmp ~/.local/lib/deadbeef/dsp_winamp.so; \
 	mkdir -pv ~/.local/bin; \
-	cp -v ddw-host-d.exe ~/.local/bin/ddw-host-d.exe.tmp; \
-	mv -v ~/.local/bin/ddw-host-d.exe.tmp ~/.local/bin/ddw-host-d.exe
+	cp -v wadsp_host.exe ~/.local/bin/wadsp_host.exe.tmp; \
+	mv -v ~/.local/bin/wadsp_host.exe.tmp ~/.local/bin/wadsp_host.exe
 
 uninstall:
 	@rm -fv ~/.local/lib/deadbeef/dsp_winamp.so; \
-	rm -fv ~/.local/bin/ddw-host-d.exe
+	rm -fv ~/.local/bin/wadsp_host.exe
 
 clean:
 	@rm -frv ./*.exe ./*.so ./.lib
@@ -78,7 +78,7 @@ watchplugin:
 
 ## ---------------------------------------------------------------------
 
-host: ddw-host-d.exe
+host: wadsp_host.exe
 
 host_OBJS = \
 	.lib/host/src/io.o \
@@ -158,7 +158,7 @@ host_CXXFLAGS += $(warns) $(cxxwarns)
 host_LDFLAGS += -Wl,--no-insert-timestamp
 host_LIBS += -lntdll -ldwmapi -ld3d9 -static-libstdc++ -static-libgcc
 
-ddw-host-d-unittest.exe: host_LDFLAGS += -mconsole
+wadsp_host-unittest.exe: host_LDFLAGS += -mconsole
 
 .lib/host/%.o .lib/host/%_unittest.o: %.c
 	mkdir -p $(dir $@)
@@ -168,19 +168,19 @@ ddw-host-d-unittest.exe: host_LDFLAGS += -mconsole
 	mkdir -p $(dir $@)
 	$(host_CXX) -c $< $(host_CXXFLAGS) -o $@
 
-ddw-host-d.exe: $(host_OBJS) $(imgui_OBJS)
+wadsp_host.exe: $(host_OBJS) $(imgui_OBJS)
 	$(host_CXX) $^ $(host_LDFLAGS) -o $@.tmp $(host_LIBS)
 	mv -f $@.tmp $@
 
-ddw-host-d-unittest.exe: $(host_unittest_OBJS) $(imgui_OBJS)
+wadsp_host-unittest.exe: $(host_unittest_OBJS) $(imgui_OBJS)
 	$(host_CXX) $^ $(host_LDFLAGS) -o $@.tmp $(host_LIBS)
 	mv -f $@.tmp $@
 
-testhost: ddw-host-d-unittest.exe
-	wine ddw-host-d-unittest.exe
+testhost: wadsp_host-unittest.exe
+	wine wadsp_host-unittest.exe
 
 watchhost:
-	find src/ -name '*.[ch]*' | entr -cs 'sleep 0.001; make ddw-host-d.exe'
+	find src/ -name '*.[ch]*' | entr -cs 'sleep 0.001; make wadsp_host.exe'
 
 ## ---------------------------------------------------------------------
 

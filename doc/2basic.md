@@ -9,7 +9,7 @@ Before you
 Set **Host command** to a shell command that will run the host
 executable. For example, on my system, it is:
 
-    wine ~/.local/bin/ddw-host-d.exe
+    wine ~/.local/bin/wadsp_host.exe
 
 Note: If you're using a sandboxing wrapper like Bubblewrap here, make
 sure the command has access to the same `/dev/shm` so that all features
