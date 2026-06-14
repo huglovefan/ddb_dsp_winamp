@@ -14,7 +14,7 @@ uninstall:
 	rm -fv ~/.local/bin/ddw-host-d.exe
 
 clean:
-	@rm -fv ./*.exe ./*.i ./*.o ./*.obj ./*.so ./*.pdb
+	@rm -frv ./*.exe ./*.so ./.lib
 
 ## ---------------------------------------------------------------------
 
