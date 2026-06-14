@@ -47,7 +47,7 @@ static char *get_cmd(
 
 		hostcmd = deadbeef->conf_get_str_fast(
 		    CONFKEY_HOSTCMD,
-		    "ddw_host.exe");
+		    CONFVAL_HOSTCMD);
 
 		self->host_cmd = strdup(hostcmd);
 		/* clumsy. skip the other thing if this failed. */

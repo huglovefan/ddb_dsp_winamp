@@ -143,7 +143,7 @@ static DB_dsp_t plugindef = {
 		.message = &dsp_winamp_message,
 		.configdialog =
 		    "property \"Host command\" entry " CONFKEY_HOSTCMD
-		    " \"ddw_host.exe\";\n"
+		    " \"" CONFVAL_HOSTCMD "\";\n"
 		    "property"
 		    " \"Allow returning integer samples to deadbeef\""
 		    " checkbox " CONFKEY_INTOUTPUT " 0;\n"
@@ -506,7 +506,7 @@ static int dsp_winamp_message(
 			deadbeef->conf_lock();
 			host_cmd = deadbeef->conf_get_str_fast(
 			    CONFKEY_HOSTCMD,
-			    "ddw_host.exe");
+			    CONFVAL_HOSTCMD);
 			for (
 			    plugin = g_instances.head;
 			    plugin;

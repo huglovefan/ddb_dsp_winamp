@@ -9,6 +9,7 @@
 #define SHM_FILENAME_BASE "/dev/shm/deadbeef_wadsp."
 
 #define CONFKEY_HOSTCMD   "wadsp.host_cmd"
+#define CONFVAL_HOSTCMD   "wine ~/.local/bin/wadsp_host.exe"
 #define CONFKEY_INTOUTPUT "wadsp.allow_int_output"
 
 extern DB_functions_t *deadbeef;
