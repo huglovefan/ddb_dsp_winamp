@@ -71,8 +71,7 @@ After this step, you can proceed on to [Basic usage](./2basic.md).
 
 Most of the time, this should be enough:
 
-    git fetch origin
-    git merge --ff-only origin/master
+    git pull --ff-only
 
 Then re-read this document from the beginning, skipping the `git clone`
 step. Beware that other documentation could have changed too.
