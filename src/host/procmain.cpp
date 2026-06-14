@@ -12,7 +12,6 @@
 #include "../crc32.h"
 #include <math.h>
 #include <inttypes.h>
-#include <heapapi.h>
 #include "plugconv.hpp"
 #include "plugrest.hpp"
 
@@ -586,12 +585,6 @@ static bool iter_process_samples(iter_vars *vars)
 	 * [3/7] prepare buffer
 	 */
 
-	if (!HeapValidate(GetProcessHeap(), 0, nullptr))
-	{
-		fastprintf("HeapValidate failed at %s(%d)\n", __FILE__, __LINE__);
-		__builtin_trap();
-	}
-
 	restotal = afmt_frame_bytes_n(
 	    &curfmt,
 	    required_reserve_frames(vars->plugins));
@@ -635,23 +628,11 @@ static bool iter_process_samples(iter_vars *vars)
 	 * [5/7] process!
 	 */
 
-	if (!HeapValidate(GetProcessHeap(), 0, nullptr))
-	{
-		fastprintf("HeapValidate failed at %s(%d)\n", __FILE__, __LINE__);
-		__builtin_trap();
-	}
-
 	plugin_process_all(
 	    vars->plugins,
 	    curfmt,
 	    vars->data,
 	    vars->tmp);
-
-	if (!HeapValidate(GetProcessHeap(), 0, nullptr))
-	{
-		fastprintf("HeapValidate failed at %s(%d)\n", __FILE__, __LINE__);
-		__builtin_trap();
-	}
 
 	assert(vars->plugins_locked);
 	PLUGIN_LIST_UNLOCK_RDONLY(vars->plugins);

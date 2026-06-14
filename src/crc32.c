@@ -73,7 +73,6 @@ crc32p_end(uint32_t state)
 	return ~state;
 }
 
-
 uint32_t
 crc32(const void *input, size_t size)
 {

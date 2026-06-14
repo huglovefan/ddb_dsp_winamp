@@ -366,7 +366,6 @@ end:
 
 	if (playlist)
 		deadbeef->plt_unref(playlist);
-
 }
 
 static void request_reset_all(bool is_track_change)
@@ -462,119 +461,6 @@ static int dsp_winamp_message(
 	/* we pretty much only care about any of this if shm exists. */
 	if (!shm)
 		return 0;
-
-	if (0)
-	switch (id)
-	{
-	case DB_EV_NEXT:
-		printf("DB_EV_NEXT\n");
-		break;
-	case DB_EV_PREV:
-		printf("DB_EV_PREV\n");
-		break;
-	case DB_EV_PLAY_CURRENT:
-		printf("DB_EV_PLAY_CURRENT\n");
-		break;
-	case DB_EV_PLAY_NUM:
-		printf("DB_EV_PLAY_NUM\n");
-		break;
-	case DB_EV_STOP:
-		printf("DB_EV_STOP\n");
-		break;
-	case DB_EV_PAUSE:
-		printf("DB_EV_PAUSE\n");
-		break;
-	case DB_EV_PLAY_RANDOM:
-		printf("DB_EV_PLAY_RANDOM\n");
-		break;
-	case DB_EV_TERMINATE:
-		printf("DB_EV_TERMINATE\n");
-		break;
-	case DB_EV_REINIT_SOUND:
-		printf("DB_EV_REINIT_SOUND\n");
-		break;
-	case DB_EV_CONFIGCHANGED:
-		printf("DB_EV_CONFIGCHANGED\n");
-		break;
-	case DB_EV_TOGGLE_PAUSE:
-		printf("DB_EV_TOGGLE_PAUSE\n");
-		break;
-	case DB_EV_ACTIVATED:
-		printf("DB_EV_ACTIVATED\n");
-		break;
-	case DB_EV_PAUSED:
-		printf("DB_EV_PAUSED\n");
-		break;
-	case DB_EV_PLAYLISTCHANGED:
-		printf("DB_EV_PLAYLISTCHANGED\n");
-		break;
-	case DB_EV_VOLUMECHANGED:
-		printf("DB_EV_VOLUMECHANGED\n");
-		break;
-	case DB_EV_OUTPUTCHANGED:
-		printf("DB_EV_OUTPUTCHANGED\n");
-		break;
-	case DB_EV_PLAYLISTSWITCHED:
-		printf("DB_EV_PLAYLISTSWITCHED\n");
-		break;
-	case DB_EV_SEEK:
-		printf("DB_EV_SEEK\n");
-		break;
-	case DB_EV_ACTIONSCHANGED:
-		printf("DB_EV_ACTIONSCHANGED\n");
-		break;
-	case DB_EV_DSPCHAINCHANGED:
-		printf("DB_EV_DSPCHAINCHANGED\n");
-		break;
-	case DB_EV_SELCHANGED:
-		printf("DB_EV_SELCHANGED\n");
-		break;
-	case DB_EV_PLUGINSLOADED:
-		printf("DB_EV_PLUGINSLOADED\n");
-		break;
-	case DB_EV_FOCUS_SELECTION:
-		printf("DB_EV_FOCUS_SELECTION\n");
-		break;
-	case DB_EV_PLAYBACK_STATE_DID_CHANGE:
-		printf("DB_EV_PLAYBACK_STATE_DID_CHANGE p1=%u\n", param1);
-		break;
-	case DB_EV_PLAY_NEXT_ALBUM:
-		printf("DB_EV_PLAY_NEXT_ALBUM\n");
-		break;
-	case DB_EV_PLAY_PREV_ALBUM:
-		printf("DB_EV_PLAY_PREV_ALBUM\n");
-		break;
-	case DB_EV_PLAY_RANDOM_ALBUM:
-		printf("DB_EV_PLAY_RANDOM_ALBUM\n");
-		break;
-
-	case DB_EV_SONGCHANGED:
-		printf("DB_EV_SONGCHANGED\n");
-		break;
-	case DB_EV_SONGSTARTED:
-		printf("DB_EV_SONGSTARTED\n");
-		break;
-	case DB_EV_SONGFINISHED:
-		printf("DB_EV_SONGFINISHED\n");
-		break;
-	case DB_EV_TRACKINFOCHANGED:
-		printf("DB_EV_TRACKINFOCHANGED\n");
-		break;
-	case DB_EV_SEEKED:
-		printf("DB_EV_SEEKED\n");
-		break;
-	case DB_EV_TRACKFOCUSCURRENT:
-		printf("DB_EV_TRACKFOCUSCURRENT\n");
-		break;
-	case DB_EV_CURSOR_MOVED:
-		printf("DB_EV_CURSOR_MOVED\n");
-		break;
-
-	default:
-		printf("%u\n", id);
-	}
-	//~ if (ctx || param1 || param2)
-		//~ printf(" -> ctx=%p p1=%u p2=%u\n", (void *)ctx, param1, param2);
 
 	switch (id)
 	{

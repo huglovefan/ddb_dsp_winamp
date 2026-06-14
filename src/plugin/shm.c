@@ -7,10 +7,6 @@
 #include <sys/mman.h>
 #include <unistd.h>
 
-#if !defined(O_CLOEXEC)
-# define O_CLOEXEC 0
-#endif
-
 void *shmnew(const char *path, size_t sz)
 {
 	void *p;
