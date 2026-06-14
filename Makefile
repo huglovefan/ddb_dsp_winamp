@@ -26,7 +26,6 @@ plugin_OBJS = \
 	.lib/plugin/src/plugin/main.o \
 	.lib/plugin/src/plugin/misc.o \
 	.lib/plugin/src/plugin/shm.o \
-	.lib/plugin/src/plugin/shmupdater.o \
 	.lib/plugin/src/plugin/fmt.o \
 	.lib/plugin/src/afmt.o \
 	.lib/plugin/src/sfmt.o \
