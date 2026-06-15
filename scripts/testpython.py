@@ -352,7 +352,7 @@ class host:
 
 # benchmark loop silence
 if 1:
-	h = host(['dsp_test'])
+	h = host(['./dsp_test.dll'])
 	fmt = AFMT(SFMT.F32, 2, 44100)
 	sec_in = 0.092
 	frames_in = round(sec_in * fmt.rate)
