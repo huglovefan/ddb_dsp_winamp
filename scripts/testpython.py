@@ -261,6 +261,9 @@ class host:
 	p: subprocess.Popen[bytes]
 
 	def __init__(self, plugins: List[str]) -> None:
+		if not os.path.isfile('wadsp_host.exe'):
+			print('error: host exe does not exist')
+			assert(0)
 		self.p = subprocess.Popen(
 		    ['wine',
 		     'wadsp_host.exe']+plugins,
