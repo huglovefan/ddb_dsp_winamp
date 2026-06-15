@@ -14,7 +14,7 @@ uninstall:
 	rm -fv ~/.local/bin/wadsp_host.exe
 
 clean:
-	@rm -frv ./*.exe ./*.so ./.lib
+	@rm -frv ./*.dll ./*.exe ./*.so ./.lib
 
 ## ---------------------------------------------------------------------
 
@@ -216,6 +216,25 @@ $(testconv_OBJS): src/conv.h src/sfmt.h
 
 testconv: $(testconv_OBJS)
 	$(testconv_CC) $^ $(testconv_LDFLAGS) -o $@ $(testconv_LIBS)
+
+## ---------------------------------------------------------------------
+
+dsp_test_OBJS = \
+	.lib/dsp_test/src/bin/dsp_test.o \
+
+$(dsp_test_OBJS): src/*.h* src/*/*.h*
+
+dsp_test_CC = i686-w64-mingw32-gcc-win32 -shared -municode -std=c99 -msse
+
+dsp_test_CFLAGS += -O2 -g -Wall -Wextra -Wno-unused-parameter
+dsp_test_CFLAGS += -std=c99 -fno-asm -pedantic -Wall -Wextra -Wno-unused-variable -Wno-unused-but-set-variable
+
+.lib/dsp_test/%.o: %.c
+	mkdir -p $(dir $@)
+	$(dsp_test_CC) -c $< $(dsp_test_CFLAGS) -o $@
+
+dsp_test.dll: $(dsp_test_OBJS)
+	$(dsp_test_CC) $^ -o $@
 
 ## ---------------------------------------------------------------------
 
