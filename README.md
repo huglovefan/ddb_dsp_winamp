@@ -32,6 +32,7 @@ Now with a clicky GUI:
 
 **Misc:**
 
+-   [Plugins](doc/plugins.md) - list of tested plugins, where to find more
 -   [UI explanation](doc/ui.md) - what's in the screenshots
 
 ## Credit and copyright
