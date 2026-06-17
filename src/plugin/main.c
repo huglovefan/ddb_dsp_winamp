@@ -330,44 +330,6 @@ static void shm_update_global_config(void)
 #endif
 }
 
-static void log_trks(const char *where)
-{
-	ddb_playItem_t *track;
-	ddb_playlist_t *playlist;
-	int pos;
-
-	playlist = NULL;
-	track = deadbeef->streamer_get_playing_track_safe();
-
-	if (!track)
-	{
-		fprintf(stderr, "%s (!track)\n", where);
-		goto end;
-	}
-
-	playlist = deadbeef->pl_get_playlist(track);
-
-	if (!playlist)
-	{
-		fprintf(stderr, "%s (!playlist)\n", where);
-		goto end;
-	}
-
-	pos =
-	    deadbeef->plt_get_item_idx
-	    (playlist, track, PL_MAIN);
-
-	fprintf(stderr, "%s (idx=%d)\n", where, pos);
-
-end:
-
-	if (track)
-		deadbeef->pl_item_unref(track);
-
-	if (playlist)
-		deadbeef->plt_unref(playlist);
-}
-
 static void request_reset_all(bool is_track_change)
 {
 	struct Ddw *plugin;
