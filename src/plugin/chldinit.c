@@ -32,7 +32,7 @@ static char *get_cmd(
 		return NULL;
 
 #define FMTARGS \
-	    "export DDW_SHM_NAME=%s%d; exec %s %s", \
+	    "export DDW_SHM_NAME=%s%d; %s %s", \
 	    SHM_FILENAME_BASE, \
 	    pid, \
 	    hostcmd, \
